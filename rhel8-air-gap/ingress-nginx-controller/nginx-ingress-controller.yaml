@@ -1,0 +1,22 @@
+# NGINX.com Edition installs by operator
+# NGINX Ingress Controller
+# https://docs.nginx.com/nginx-ingress-controller/installation/installing-nic/installation-with-operator/ 
+# https://hub.docker.com/r/nginx/nginx-ingress 
+# docker pull nginx/nginx-ingress:3.4.3-ubi
+apiVersion: charts.nginx.org/v1alpha1
+kind: NginxIngress
+metadata:
+  name: nginxingress-sample
+  namespace: nginx-ingress
+spec:
+  controller:
+    image:
+      pullPolicy: IfNotPresent
+      repository: nginx/nginx-ingress
+      tag: 3.4.3-ubi
+    ingressClass: nginx
+    kind: deployment
+    nginxplus: false
+    replicaCount: 1
+    serviceAccount:
+      imagePullSecretName: ""

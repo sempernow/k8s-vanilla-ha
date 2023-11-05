@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+export ANSIBASH_VERSION='0.2.4'
+
+_ansibash(){
+
+    usage(){
+        ###  PRESERVE TABs of HEREDOC  ###
+		cat <<-EOH
+
+			  A Bash/GNU sort of Ansible requiring nearly no configuration.
+			
+			  Provision and/or configure all target machines of the ANSIBASH_TARGET_LIST,
+			  optionally as ANSIBASH_USER, using ad-hoc commands and/or local or remote scripts:
+			
+			  USAGE:  ${0##*/} [-x] "command '\$local_arg1' 'local arg 2' '\\\$remote_arg'"
+			          ${0##*/} -c 'command1 args;command2 argX "\$remote_arg" && command3 argY'
+			          ${0##*/} -s "/path/to/local/script.sh arg1 '\$local_arg' '\\\$remote_arg'"
+			          ${0##*/} -u /path/to/local/source [/path/to/remote/parent (Default:~)]
+			          ${0##*/} -d /path/to/remote/source [/path/to/local/parent (Default:.)]
+		EOH
+    }
+    want(){
+        ###  PRESERVE TABs of HEREDOC  ###
+		cat <<-EOH
+
+			  REQUIREs: Environment variables declaring (ssh-configured) host(s) and user.
+
+			            export ANSIBASH_TARGET_LIST='host1 host2.local 10.160.111.22'
+			            export ANSIBASH_USER='Optional_user_name_overrides_the_ssh-configured_User'
+
+		EOH
+    }
+    have(){
+        ###  PRESERVE TABs of HEREDOC  ###
+		cat <<-EOH
+
+		  ANSIBASH_TARGET_LIST='$ANSIBASH_TARGET_LIST'
+		  ANSIBASH_USER='$(ssh_user)'
+
+		EOH
+    }
+    ssh_user(){
+        # ARGs: [VM]
+        unset _ssh_user
+        [[ $ANSIBASH_USER ]] && { echo "$ANSIBASH_USER";return 0; }
+        [[ $1 ]] && _ssh_user=$(grep -A5 'Host ' ~/.ssh/config |grep -A5 " $1" |grep User |awk '{print $2}' |head -n1)
+        [[ $_ssh_user ]] && echo "$_ssh_user" || echo "$(id -un)"
+    }
+
+    [[ $ANSIBASH_TARGET_LIST ]] || { usage;want;exit; }
+    [[ $@ ]] || { usage;have;exit; }
+    [[ "${1:0:1}" != '-' ]] && mode='-x' || { mode=$1;shift; }
+    [[ $4 ]] && more='…' || unset more
+    [[ "$mode" == '-u' ]] && {
+        [[ $2 ]] && target=$2 || target=${1##*/}
+    }
+
+    for vm in $ANSIBASH_TARGET_LIST
+    do
+        conn=$(ssh_user $vm)@$vm
+        echo "=== $conn : $1 $2 $3 $more"
+        ssh $conn logger "ansibash : BY $(id -un)@$(hostname) AS $conn : $1 ..."
+        [[ $mode == '-x' ]] && ssh $conn "$@"
+        [[ $mode == '-c' ]] && ssh $conn /bin/bash -c "$@"
+        [[ $mode == '-s' ]] && {
+            # Must list each positional param else may error: "ambiguous redirect"
+            ssh -T $conn /bin/bash -s < $1 $2 $3 $4 $5 $6 $7 $8 $9
+        }
+        [[ $mode == '-u' ]] && scp -pr "$1" $conn:$target
+        [[ $mode == '-d' ]] && scp -pr "$conn:$1" "${2:-.}/${vm}_${1##*/}"
+        ## TODO : Add rsync method(s) to handle directory push/pull.
+        echo ''
+    done
+
+    return 0
+}
+
+ [[ "$1" == 'version' ]] && {
+    echo "  v$ANSIBASH_VERSION"
+    exit 0
+ }
+
+_ansibash "$@"
+

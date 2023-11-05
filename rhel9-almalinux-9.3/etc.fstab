@@ -1,0 +1,4 @@
+/dev/mapper/almalinux-root                /          xfs     defaults                   0 0
+UUID=0ef0e28d-a54d-4cd6-b7f8-f55b5ca9ae03 /boot      xfs     defaults                   0 0
+UUID=B872-847F                            /boot/efi  vfat    umask=0077,shortname=winnt 0 2
+/dev/mapper/almalinux-swap                none       swap    defaults                   0 0

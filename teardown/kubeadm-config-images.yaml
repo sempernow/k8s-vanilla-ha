@@ -1,0 +1,4 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: 1.28.5
+imageRepository: registry.k8s.io

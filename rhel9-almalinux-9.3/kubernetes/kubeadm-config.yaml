@@ -1,0 +1,40 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+certificateKey: fb594fa0b1af4fef77045ba76afd3029146557c70677d6f0b447aeac37ffb8ea 
+bootstrapTokens:
+- token: ojt3kn.5kin2no0pyy554eh
+  ttl: 24h
+  usages:
+  - authentication
+  - signing
+  groups:
+  - system:bootstrappers:kubeadm:default-node-token
+nodeRegistration:
+  name: a1.local
+  criSocket: unix:///var/run/containerd/containerd.sock
+  ignorePreflightErrors:
+  - Mem
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: 1.29.1
+imageRepository: registry.k8s.io
+controlPlaneEndpoint: 192.168.0.100:8443
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration  ## /var/lib/kubelet/config.yaml
+cgroupDriver: systemd 
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    token: ojt3kn.5kin2no0pyy554eh
+    apiServerEndpoint: 192.168.0.100:8443
+    caCertHashes: 
+    - sha256:sha256:bd55cff35321450ff0fdece0f1b7e3987a96a437dcad866fdf8ff40c1a0e549c 
+  tlsBootstrapToken: ojt3kn.5kin2no0pyy554eh 
+nodeRegistration: 
+  ignorePreflightErrors:
+  - Mem
+  criSocket: unix:///var/run/containerd/containerd.sock 

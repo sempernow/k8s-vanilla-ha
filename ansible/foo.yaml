@@ -1,0 +1,14 @@
+---
+- name: Testing
+  hosts: target
+  vars:
+    config_file_path: ~/.ansible/ansible.cfg
+  become: true # Switch to elevated-privileges user declared in config_file_path file
+  #become_flags: "-H -S -n"
+  gather_facts: false
+  tasks:
+  - name: Task 1 # @ Target machine(s) HOME dir
+    # Shell script 
+    #command: "sh $HOME/devops/ansible/foo.sh {{a}} {{b}}"
+    # Shell command
+    command: printf "%s\%s\n" $(hostname) $(id) >foo.log

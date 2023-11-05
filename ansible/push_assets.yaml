@@ -1,0 +1,16 @@
+---
+- name: Push assets
+  hosts: target
+  vars:
+    config_file_path: ansible.cfg
+  become: true
+  #become_flags: "-H -S -n"
+  gather_facts: false
+  tasks:
+  - name: Task 1
+    # Script @ target machine 
+    #command: "sh /home/entds.ngisn.com/4n52626/devops/ansible/foo.sh {{a}} {{b}}"
+    #command: "sh $HOME/devops/ansible/foo.sh {{a}} {{b}}"
+    #command: "sh $HOME/devops/ansible/foo.sh"
+    #command: hostname
+    command: push_assets.sh

@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: "2024-01-06T23:55:50Z"
+  labels:
+    app: ngx
+  name: ngx
+  namespace: default
+  resourceVersion: "7596"
+  uid: 1c9abeb0-ffe4-4a6b-bf31-3f093d298f16
+spec:
+  clusterIP: 10.55.248.209
+  clusterIPs:
+  - 10.55.248.209
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - nodePort: 30080
+    port: 8080
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: ngx
+  sessionAffinity: None
+  type: NodePort
+status:
+  loadBalancer: {}
