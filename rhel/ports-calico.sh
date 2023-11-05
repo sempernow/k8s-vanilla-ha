@@ -1,4 +1,4 @@
-
+#!/usr/bin/env bash
 # Open required ports
 ## firewall-cmd is interface to firewalld
 ## Calico : https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements

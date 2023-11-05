@@ -1,17 +1,16 @@
-# Disable swap : required by kubelet
-sudo swapoff -a
-sudo systemctl --now disable swap.target
-## Comment out or delete this entry:
-## /dev/mapper/almalinux-swap none                    swap    defaults        0 0
-grep -v swap /etc/fstab |sudo tee /etc/fstab
-## Also see systemd.swap
+#!/usr/bin/env bash
 
-# Disable SELinux : now and forever
-sudo setenforce 0
-sudo sed -i -e 's/^SELINUX=permissive/SELINUX=disabled/' /etc/selinux/config
+# UPDATE : Move this Swap disable section to post-env.sh
+# to allow Swap during pkgs install, else small machines choke.
 
-## Configure local DNS (once) : limited to self recognition 
-[[ $(cat /etc/hosts |grep $(hostname)) ]] && exit 
+## Configure local DNS (once) : self recognition only
+[[ $(cat /etc/hosts |grep $(hostname)) ]] && { 
+    echo '=== /etc/hosts : ALREADY CONFIGURED'
+    cat /etc/hosts
+    
+    exit 
+} 
+echo '=== /etc/hosts'
 cat <<-EOH |sudo tee /etc/hosts
 127.0.0.1 localhost $(hostname)
 ::1       localhost $(hostname)

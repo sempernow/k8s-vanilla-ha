@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Open required ports
 ## firewall-cmd is interface to firewalld
 ## https://kubernetes.io/docs/reference/networking/ports-and-protocols/

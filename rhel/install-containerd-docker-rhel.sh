@@ -4,17 +4,13 @@
 # REF:
 #   https://kubernetes.io/docs/setup/production-environment/
 #   https://github.com/containerd/containerd/releases
-CRI_VERSION='1.7.8'
 
-[[ $(arch) = aarch64 ]] && ARCH=arm64
-[[ $(arch) = x86_64  ]] && ARCH=amd64
-
-[[ $(type -t dnf) ]] || { echo '=== REQUIREs dnf Package Manager'; exit; } 
+[[ $(type -t dnf) ]] || { echo '=== REQUIREs dnf Package Manager'; exit 11; } 
 
 # CRI Runtime : containerd
 # https://kubernetes.io/docs/setup/production-environment/container-runtimes/#containerd
 
-# Network prerequisites
+echo '@ CRI Runtime : Configure network prerequisites'
 ## br_netfilter enables transparent masquerading and facilitates Virtual Extensible LAN (VxLAN) traffic for communication between Kubernetes pods across the cluster.
 cat << EOF |sudo tee /etc/modules-load.d/k8s-containerd.conf
 overlay
@@ -34,6 +30,8 @@ EOF
 ## Apply sysctl params without reboot
 sudo sysctl --system
 
+echo '@ CRI Runtime : Verify network prerequisites'
+
 ## Verify network prerequisites
 [[ $(lsmod |grep br_netfilter) ]] \
     && echo '=== OKAY : br_netfilter module' \
@@ -44,12 +42,17 @@ sudo sysctl --system
 # Show settings (k = v)
 sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
 
-# Install containerd and dependencies
+echo '@ Docker CE + containerd and dependencies'
 
 the_hard_way(){
     # Containerd
+    cri_version='1.7.8'
+    [[ $(arch) = aarch64 ]] && cri_arch=arm64
+    [[ $(arch) = x86_64  ]] && cri_arch=amd64
+    [[ $cri_arch ]] || { echo '=== FAIL @ containerd install';exit 99; }
+
     ## Install containerd
-    release="containerd-${CRI_VERSION}-linux-${ARCH}"
+    release="containerd-${cri_version}-linux-${cri_arch}"
     wget ${release}.tar.gz
     tar -C /usr/local -xzvf ${release}.tar.gz
 
@@ -84,11 +87,16 @@ the_easy_way(){
     # https://docs.docker.com/engine/install/centos/
     
     # Prep
+    echo '@ Docker prep : Install yum-utils'
     sudo yum -y install yum-utils
-    sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-    sudo yum update
+    url='https://download.docker.com/linux/centos/docker-ce.repo'
+    #sudo yum-config-manager --add-repo $url # command not exist
+    sudo dnf -y config-manager --add-repo $url
+    
+    sudo yum -y update
 
     # Install Docker-CE server (dockerd), client (docker), tools and dependencies
+    echo '@ Docker + CRI Runtime (containerd) : Install'
     sudo yum -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
     # ERROR:
@@ -96,34 +104,46 @@ the_easy_way(){
         # Symbol not inside parenthesis at line 1 of /var/lib/selinux/targeted/tmp/modules/100/postgresql/cil
         # Failed to allocate memory
 
-    # Install cri-tools : crictl, critest
+    # Install cri-tools : crictl + critest
     [[ $(type -t crictl) ]] || {
-        # Install cri-tools 
         # https://github.com/kubernetes-sigs/cri-tools
         # https://github.com/kubernetes-sigs/cri-tools/releases/
-        VERSION="v1.28.0" 
+        ver="v1.28.0" 
+        base_url="https://github.com/kubernetes-sigs/cri-tools/releases/download/$ver"
 
-        # @ crictl 
-        wget https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz
-        sudo tar zxvf crictl-$VERSION-linux-amd64.tar.gz -C /usr/local/bin
-        rm -f crictl-$VERSION-linux-amd64.tar.gz
+        echo '@ cri-tools : Download and Install'
+        echo '=== crictl'
+        # @ crictl binary : Download and install
+        wget --quiet $base_url/crictl-$ver-linux-amd64.tar.gz \
+            && sudo tar zxvf crictl-$ver-linux-amd64.tar.gz -C /usr/local/bin \
+            && rm -f crictl-$ver-linux-amd64.tar.gz
 
-        # @ critest
-        wget https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/critest-$VERSION-linux-amd64.tar.gz
-        sudo tar zxvf critest-$VERSION-linux-amd64.tar.gz -C /usr/local/bin
-        rm -f critest-$VERSION-linux-amd64.tar.gz
+        echo '=== critest'
+        # @ critest binary : Download and install
+        wget --quiet $base_url/critest-$ver-linux-amd64.tar.gz \
+            && sudo tar zxvf critest-$ver-linux-amd64.tar.gz -C /usr/local/bin \
+            && rm -f critest-$ver-linux-amd64.tar.gz
     }
     [[ $(type -t crictl) ]] && {
+
+        echo '@ cri-tools : Configure'
+        # CRI tools require sudo to run, yet they are not in sudo PATH, so create soft link
+        sudo ln -s /usr/local/bin/crictl  /usr/sbin/crictl
+        sudo ln -s /usr/local/bin/critest /usr/sbin/critest
+
         # Verify 
-        crictl --version
-        critest --version
+        sudo crictl --version && sudo critest --version || { echo '=== FAIL @ cri-tools install';exit 22; }
+
         # Configure crictl 
-        cmd=$(which crictl) # path is not in sudo PATH
-        sudo $cmd config --set runtime-endpoint=unix:///run/containerd/containerd.sock
-        cat /etc/crictl.yaml
+        sudo crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock \
+            || { echo '=== FAIL @ crictl config'; exit 33; }
+
+        #cat /etc/crictl.yaml
+
         true
     } || {
-        echo "=== FAIL : cri-tools NOT installed."
+        echo "=== FAIL @ cri-tools install"
+        exit 44
     }
 
     ## Reset config.toml for kubernetes (Enable CRI-Integration plugin)
@@ -147,9 +167,9 @@ the_easy_way
 
 # Configure docker 
 docker_config(){
-    pkg=docker
     # Post-install
-    [[ $(type -t $pkg) ]] && {
+    [[ $(type -t docker) ]] && {
+        echo '@ Docker config : group/user'
         # Create docker group, add current user to group, and activate changes now.
         [[ $(groups |grep docker) ]] || {
             sudo groupadd docker
@@ -165,7 +185,7 @@ docker_config(){
         exit
 
     } || {
-        echo "=== FAIL : REQUIREs $pkg"
+        echo "=== FAIL : REQUIREs docker"
     }
 }
 

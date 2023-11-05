@@ -1,19 +1,63 @@
-# [Kubernetes.io](https://kubernetes.io/docs/)
+# [`k8s-vanilla-ha`](https://github.com/sempernow/k8s-vanilla-ha "GitHub : sempernow/k8s-vanilla-ha") | [Kubernetes.io](https://kubernetes.io/docs/) | [Releases](https://github.com/kubernetes/kubernetes/releases)
 
-Install a Vanilla K8s cluster and Calico for Pod Network (Network Policy. Optionally configure with an external HA Load Balancer built of HAProxy and Keepalived.
+Install a Vanilla K8s cluster and Calico NetworkPolicy.  
+Optionally configure with an external 2-node HA load balancer  
+built of HAProxy and Keepalived.
 
-- The HA topology requires at least two control-plane nodes.
+- The HA topology requires at least two load-balancer nodes, 
+  which may also be Kubernetes control nodes.
 - Tested on 4 Hyper-V VMs running AlmaLinux 8
-    - CPU: 1
+    - CPU: 2
     - Memory: 2GB
     - Storage: 20GB
     - Network: Eternal (Host)
 
-## Prep
+## Prep the Host(s) OS
 
 Provision and configure all nodes for K8s
 
-### Install and Configure
+### Preliminary Setup
+
+Every target machine must be configured
+
+- Set hostname
+    ```bash
+    printf "%s\n" $ANSIBASH_TARGET_LIST \
+        |xargs -IX /bin/bash -c 'ssh $1 sudo hostnamectl set-hostname $1.local' _ X
+    ```
+- Configure for ssh 
+    - Add target "`IP_ADDR FQDN`" map to local DNS resolver.
+    ```bash
+    echo $vm_ip $vm_fqdn |sudo tee -a /etc/hosts
+    ```
+    - Push key to target.
+    ```bash
+    hostfprs $vm_fqdn # Scan and list host fingerprint(s) (FPRs)
+    # Validate host by matching host-claimed FPR against those scanned,
+    # and push key if match.
+    ssh-copy-id ~/.ssh/config/vm_common $vm_fqdn 
+    ```
+    - Add target `Host` entry to `~/.ssh/config`.
+- Configure ssh user for automated/headless `sudo`
+    - Create/Mod `/etc/sudoers.d/$USER` file at each target machine.
+    ```bash
+    echo "$USER ALL=(ALL) NOPASSWD: ALL" |sudo tee /etc/sudoers.d/$USER
+    ```
+    ```bash
+    # Test
+    ssh $vm sudo cat /etc/sudoers
+    ```
+
+#### Verify Targets are Configured for Automation
+
+At each machine, attempt to print (`cat`) a file 
+that requires elevated privileges to do so.
+
+```bash
+ansibash 'sudo cat /etc/sudoers.d/$USER'
+```
+
+## Prep : Install/Configure Packages/Tools
 
 ```bash
 ssh_configured_nodes='a0 a1 a2 a3'
@@ -28,11 +72,59 @@ pushd etcd
 ./provision-etcd.sh $ssh_configured_nodes
 popd
 ```
+- If VMs are of Hyper-V with dynamic memory, 
+then decompose the provisioning script into segments, 
+and reboot after each, else FS error on "Out of memory" 
+during package install operations.
 
-### Test `etcd`
+### @ Air-gap Install : Muster Assets
+
+- Target machines must have 10GB+ @ `/var/local/repos`
+
+Steps
+
+1. Download/Install all required packages,
+and pull all required Docker images 
+at any (non-target) administrative machine.
+2. Diff the installed RPMs, before versus after K8s-pkgs install,
+   and then download the diff list.
+3. Run `kubeadm config images pull` 
+   to download all required Docker images,
+   and then "`docker save`" each to `.tar`.
+4. Proceed to next step, but modify the commands 
+   regarding RPM package installs 
+   to account for those packages being local.
 
 ```bash
-export ANSIBASH_TARGET_LIST="$ssh_configured_nodes"
+# List Repos
+yum list installed |awk '{ print $3 }' |sort -u |tee repolist.before.txt
+
+# Before : List installed RPM packages
+rpm -qa |tee rpm.before.k8s
+# install K8s (but don't initialize cluster)
+# After : List installed RPM packages
+rpm -qa |tee rpm.after.k8s
+
+# Muster all K8s RPMs for air-gap installs
+## Generate the list
+comm -13 <(sort rpm.before.k8s) <(sort rpm.after.k8s) |tee rpm.k8s
+## Download them
+$repo='https://repo.almalinux.org/almalinux/8/BaseOS/x86_64/os/Packages'
+cat rpm.k8s |xargs -IX wget $repo/X.rpm
+
+sudo kubeadm config images pull |& tee kubeadm.config.images.pull.log
+
+```
+
+### Verify 
+
+```bash
+# Environment
+export ANSIBASH_TARGET_LIST="a0 a1 a2 a3"
+
+# crictl : List the K8s-core images
+ansibash sudo crictl images
+# etcd : Read/Write test
 pushd etcd
 ansibash -s etcd-test.sh
 popd
@@ -41,16 +133,16 @@ popd
 Or per node:
 
 ```bash
-pushd etcd
-ssh $vm /bin/bash -s <etcd-test.sh
-popd
+ssh $vm 
+ssh $vm COMMAND ARGs
+ssh $vm /bin/bash -s < $script
 ```
 
-### HA Load Balancer | [HAProxy](http://docs.haproxy.org/) | [Keepalived](https://keepalived.org/)
+## HA Load Balancer | [HAProxy](http://docs.haproxy.org/) | [Keepalived](https://keepalived.org/)
 
->HAProxy and Keepalived are based on Virtual Router Redundancy Protocol (VRRP) that allows all HA-LB nodes to share one virtual IP address (VIP). Connectivity to the VIP is maintained as long as one or more HA-LB nodes are functioning. Our cluster is built with two such nodes that also function as the cluster's control nodes.
+>HAProxy and Keepalived are based on Virtual Router Redundancy Protocol (VRRP) that allows all load-balancer nodes to share one virtual IP address (VIP). Connectivity to the VIP is maintained as long as one or more of its nodes are functioning. Our cluster is built with two such nodes that also function as the cluster's control nodes.
 
-#### Architecture
+### LB Architecture
 
 ```text
                       kubectl 
@@ -64,9 +156,9 @@ popd
     haproxy: 8443               haproxy: 8443        
     kube-apiserver: 6443        kube-apiserver: 6443 
 ```
-- VIP is the HA K8s Control Plane Endpoint.
+- VIP is the (highly-available) K8s control-plane endpoint.
 - For LAN access, protect VIP from gateway router's dynamic assignments
-(if VIP is in that client range of DHCP server)
+(if VIP address is in the DHCP server's client range)
 by adding the VIP to router's DHCP Address Reservation list. 
     - VIP: `192.168.0.100` (Admin selects)
     - MAC: `FE-4D-0F-3B-76-9F` (bogus)
@@ -75,7 +167,7 @@ by adding the VIP to router's DHCP Address Reservation list.
 - Keepalived service runs on all control nodes to provide `VIP` address at one of the nodes.
 - `kubectl` clients connect to this HA endpoint of the K8s control plane (`VIP:8443`).
 
-#### Install and Configure ([`provision-ha-lb.sh`](ha-lb/provision-ha-lb.sh))
+### LB Install and Configure ([`provision-ha-lb.sh`](ha-lb/provision-ha-lb.sh))
 
 Modify the provisioning script as necessary 
 to account for the parameters of your network and nodes.
@@ -86,48 +178,415 @@ pushd ha-lb
 popd
 ```
 
-#### Verify
+### LB Verify
 
 ```bash
 # Verify connectivity
-nc -zv $vip 8443 
+nc -zvw 2 $vip 8443 
 #> "Connection to 192.168.0.100 8443 port [tcp/*] succeeded!"
 # Verify HA
 ping -4 $vip # While running, toggle off each HA (control) node
 ```
 
-#### Monitor / Troubleshoot
+### LB Monitor / Troubleshoot
 
 ```bash
-ansibash journalctl -u $service --since today
+export ANSIBASH_TARGET_LIST='a0 a1'
+# Service (Unit) status
 ansibash systemctl status haproxy.service
 ansibash systemctl status keepalived.service
+# Logs per service (unit)
+ansibash journalctl -u $service --since today
+# Configuration files
+ansibash cat /etc/keepalived/keepalived.conf
+ansibash cat /etc/haproxy/haproxy.cfg
 ```
-- Either "`ansibash ...`", or per node using "`ssh $vm ...`".
+- Per node (`$vm`) by replacing `ansible` with "`ssh $vm`&hellip;".
 
 
-## Initialize Cluster : [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/)
+## Cluster Initialization
+
+- On 1st control node:
+    - `sudo kubeadm init ...`
+- On all other nodes:
+    - `sudo kubeadm join ...`
+        - With differring command options for 
+          workers versus control nodes.
+
+### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/)
 
 >Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
 
+
 ```bash
-kubeadm init --control-plane-endpoint $LOAD_BALANCER_IP:$LOAD_BALANCER_PORT --upload-certs
+kubeadm init --control-plane-endpoint $LOAD_BALANCER_IP:$LOAD_BALANCER_PORT --upload-certs --ignore-preflight-errors=Mem
 ```
 
 In our case, on the 1st control-plane node:
 
 ```bash
+# Pull images beforehand
+sudo kubeadm config images pull |& tee kubeadm.config.images.pull.log
+
+# Preflight phase only
+sudo kubeadm init phase preflight -v5 \
+    --ignore-preflight-errors=Mem \
+    |& tee kubeadm.init.phase.preflight.$(hostname).log
+
+# Initialize an HA cluster : save the printed instructions
 vip='192.168.0.100'
-kubeadm init --control-plane-endpoint "$vip:8443" --upload-certs
+sudo kubeadm init \
+    --control-plane-endpoint "$vip:8443" \
+    --upload-certs \
+    --ignore-preflight-errors=Mem \
+    |& tee kubeadm.init.$(hostname).log
+
+# Configure the client (kubectl)
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# Verify
+## Status of kubelet.service (systemd unit)
+systemctl status kubelet
+## Make request to kube-apiserver  
+## Expect node "NotReady" due to lack of CNI addon 
+kubectl get node
+# NAME       STATUS     ROLES           AGE   VERSION
+# a0.local   NotReady   control-plane   16h   v1.28.3
 ```
-1. Note the printed instructions.
-1. Configure the client (`kubectl`) 
-  by copying the server config (`admin.conf`).
-1. Install Calico, working from this node. 
-   This regards the "deploy a pod network" instruction noted above.
-    - How-to is WIP ([`install-calico.sh`](rhel/install-calico.sh)). 
+- Status of node(s) remains `NotReady` until the "Pod Nework" 
+  is configured by installing a CNI-compliant addon such as Calico. 
+  Perform such installs at any Master node.
+    - Calico install How-to is WIP ([`install-calico.sh`](rhel/install-calico.sh)). 
     The CKA method is dated:
     ```bash
     # CKA Method
     kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
     ```
+
+### Cluster-init Verify / Troubleshoot  (Pre CNI addon)
+
+The `kubelet` process is a systemd service.
+It spawns all the other core K8s processes,
+and communicates with `kube-apiserver`.
+
+```bash
+# Status of core services
+systemctl status kubelet 
+systemctl status $unit # Units: kubelet containerd docker
+systemctl status $unit 
+## Logs of core services
+journalctl -u $unit
+journalctl -xe |grep kube
+
+## Logs
+sudo cat /var/log/messages
+
+## Print all K8s and related processes; commands including options
+psk
+
+# Images
+sudo crictl images
+# Pods running
+sudo crictl pods # --state Ready --latest --namespace --label
+# Containers running
+sudo crictl ps
+# Containers all
+sudo crictl ps -a
+
+# Config files
+cat /etc/kubernetes/admin.config    # Server
+cat ~/.kube/config                  # Client
+# Manifests of Static Pods
+ls -hl /etc/kubernetes/manifests
+```
+- [`psk.sh`](rhel/psk.sh)
+- Also re-check HA load balancer status
+    - See that section above
+
+### Cluster-init Fix
+
+```bash
+# Restart primary service(s)
+sudo systemctl restart containerd.service 
+sudo systemctl restart kubelet.service
+
+# Last resort : Delete the cluster and start again
+sudo kubeadm reset # See "Cluster Teardown"
+```
+
+## Cluster Teardown 
+
+The effect of the "`kubeadm reset`" command 
+is to undo that of "`kubeadm init`".  
+It also prints info regarding its effects.
+
+It deletes the cluster by stopping all core K8s processes, 
+manifests, and data store, purging `etcd`.
+Yet the RPM package installations, Docker images and such are unharmed, 
+leaving the node (host OS) ready for the next run of "`kubeadm init`". 
+
+```bash
+sudo kubeadm reset
+```
+
+## REFerence : K8s core Processes, Pods and containers
+
+>A successful "`kubeadm init ...`" should look like this 
+>before the CNI-compatible Pod Network addon is installed.
+
+```bash
+☩ ssh a0 kubectl get nodes -o wide
+NAME       STATUS     ROLES           AGE   VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                           KERNEL-VERSION                 CONTAINER-RUNTIME
+a0.local   NotReady   control-plane   18h   v1.28.3   192.168.0.83   <none>        AlmaLinux 8.8 (Sapphire Caracal)   4.18.0-477.10.1.el8_8.x86_64   containerd://1.6.24
+
+☩ ssh a0 sudo crictl image
+IMAGE                                     TAG                 IMAGE ID            SIZE
+registry.k8s.io/coredns/coredns           v1.10.1             ead0a4a53df89       16.2MB
+registry.k8s.io/etcd                      3.5.9-0             73deb9a3f7025       103MB
+registry.k8s.io/kube-apiserver            v1.28.3             5374347291230       34.7MB
+registry.k8s.io/kube-controller-manager   v1.28.3             10baa1ca17068       33.4MB
+registry.k8s.io/kube-proxy                v1.28.3             bfc896cf80fba       24.6MB
+registry.k8s.io/kube-scheduler            v1.28.3             6d1b4fd1b182d       18.8MB
+registry.k8s.io/pause                     3.9                 e6f1816883972       322kB
+
+☩ ssh a0 sudo crictl ps
+CONTAINER           IMAGE               CREATED             STATE               NAME                      ATTEMPT             POD ID              POD
+72d811859581e       6d1b4fd1b182d       About an hour ago   Running             kube-scheduler            9                   65d7192909e91       kube-scheduler-a0.local
+4d606ea6c582a       10baa1ca17068       About an hour ago   Running             kube-controller-manager   9                   8977ebc01a183       kube-controller-manager-a0.local
+f9f0d1cbabeaa       bfc896cf80fba       18 hours ago        Running             kube-proxy                0                   1613b17736276       kube-proxy-d8hq7
+e7ef81dd76787       73deb9a3f7025       18 hours ago        Running             etcd                      8                   dd11363d1cec2       etcd-a0.local
+36b84ea53223c       5374347291230       18 hours ago        Running             kube-apiserver            8                   c7133111b7f82       kube-apiserver-a0.local
+
+☩ ssh a0 systemctl status kubelet
+● kubelet.service - kubelet: The Kubernetes Node Agent
+   Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled; vendor preset: disabled)
+  Drop-In: /usr/lib/systemd/system/kubelet.service.d
+           └─10-kubeadm.conf
+   Active: active (running) since Sat 2023-11-11 01:19:08 EST; 18h ago
+     Docs: https://kubernetes.io/docs/
+ Main PID: 7321 (kubelet)
+    Tasks: 13 (limit: 10714)
+   Memory: 132.9M
+   CGroup: /system.slice/kubelet.service
+           └─7321 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --container-runtime-endpoint=unix:///var/run/containerd/containerd.sock --pod-infra-container-image=registry.k8s.io/pause:3.9
+
+Nov 11 19:19:23 a0.local kubelet[7321]: E1111 19:19:23.250596    7321 kubelet.go:2855] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+Nov 11 19:19:28 a0.local kubelet[7321]: E1111 19:19:28.251590    7321 kubelet.go:2855] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+# ... repeated every 5 seconds
+
+☩ ssh a0 systemctl status docker
+● docker.service - Docker Application Container Engine
+   Loaded: loaded (/usr/lib/systemd/system/docker.service; enabled; vendor preset: disabled)
+   Active: active (running) since Sat 2023-11-11 00:58:10 EST; 18h ago
+     Docs: https://docs.docker.com
+ Main PID: 1041 (dockerd)
+    Tasks: 9
+   Memory: 44.0M
+   CGroup: /system.slice/docker.service
+           └─1041 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+
+Warning: Journal has been rotated since unit was started. Log output is incomplete or unavailable.
+
+☩ ssh a0 systemctl status containerd
+● containerd.service - containerd container runtime
+   Loaded: loaded (/usr/lib/systemd/system/containerd.service; enabled; vendor preset: disabled)
+   Active: active (running) since Sat 2023-11-11 01:11:09 EST; 18h ago
+     Docs: https://containerd.io
+ Main PID: 6276 (containerd)
+    Tasks: 76
+   Memory: 126.4M
+   CGroup: /system.slice/containerd.service
+           ├─6276 /usr/bin/containerd
+           ├─6882 /usr/bin/containerd-shim-runc-v2 -namespace k8s.io -id c7133111b7f82dfc25e3053cb2bf620f72b837cd900419831ef7467937746e4e -address /run/containerd/containerd.sock
+           ├─6909 /usr/bin/containerd-shim-runc-v2 -namespace k8s.io -id 8977ebc01a1835aad8052d3f74efd84669b8a0f1f0671f7338ec987e73643f45 -address /run/containerd/containerd.sock
+           ├─6946 /usr/bin/containerd-shim-runc-v2 -namespace k8s.io -id dd11363d1cec2d0a5a2eba59795489445dfbdcb9d968198b2b5f4c2e7e9b3b30 -address /run/containerd/containerd.sock
+           ├─6970 /usr/bin/containerd-shim-runc-v2 -namespace k8s.io -id 65d7192909e91d84e76c6030a982ab54f0b7a54581d71b58987baf469bafaeea -address /run/containerd/containerd.sock
+           └─7353 /usr/bin/containerd-shim-runc-v2 -namespace k8s.io -id 1613b17736276644a6b8735eeb16e886d8ccd48bf5886f73d4305682fc4b7191 -address /run/containerd/containerd.sock
+
+Nov 11 17:47:52 a0.local containerd[6276]: time="2023-11-11T17:47:52.920080462-05:00" level=info msg="RemoveContainer for \"f204c6ad7a53e6a5c5a8027b269f056b71cd068ab8a46d8a3059e381fb85a1c9\""
+Nov 11 17:47:52 a0.local containerd[6276]: time="2023-11-11T17:47:52.925746998-05:00" level=info msg="RemoveContainer for \"f204c6ad7a53e6a5c5a8027b269f056b71cd068ab8a46d8a3059e381fb85a1c9\" returns successfully"
+Nov 11 17:48:11 a0.local containerd[6276]: time="2023-11-11T17:48:11.912410311-05:00" level=info msg="CreateContainer within sandbox \"8977ebc01a1835aad8052d3f74efd84669b8a0f1f0671f7338ec987e73643f45\" for container &ContainerMetadata{Name:kube-controller-manager,Attempt:9,}"
+Nov 11 17:48:11 a0.local containerd[6276]: time="2023-11-11T17:48:11.939738749-05:00" level=info msg="CreateContainer within sandbox \"8977ebc01a1835aad8052d3f74efd84669b8a0f1f0671f7338ec987e73643f45\" for &ContainerMetadata{Name:kube-controller-manager,Attempt:9,} returns container id \"4d606ea6c582a29fba80579f108e45430a27848d54d72065b47e2efbd3778503\""
+Nov 11 17:48:11 a0.local containerd[6276]: time="2023-11-11T17:48:11.940123665-05:00" level=info msg="StartContainer for \"4d606ea6c582a29fba80579f108e45430a27848d54d72065b47e2efbd3778503\""
+Nov 11 17:48:12 a0.local containerd[6276]: time="2023-11-11T17:48:12.010394991-05:00" level=info msg="StartContainer for \"4d606ea6c582a29fba80579f108e45430a27848d54d72065b47e2efbd3778503\" returns successfully"
+Nov 11 17:48:13 a0.local containerd[6276]: time="2023-11-11T17:48:13.912098969-05:00" level=info msg="CreateContainer within sandbox \"65d7192909e91d84e76c6030a982ab54f0b7a54581d71b58987baf469bafaeea\" for container &ContainerMetadata{Name:kube-scheduler,Attempt:9,}"
+Nov 11 17:48:13 a0.local containerd[6276]: time="2023-11-11T17:48:13.985540326-05:00" level=info msg="CreateContainer within sandbox \"65d7192909e91d84e76c6030a982ab54f0b7a54581d71b58987baf469bafaeea\" for &ContainerMetadata{Name:kube-scheduler,Attempt:9,} returns container id \"72d811859581e150353cf3a98d3f6657e5f07988e95096f57f93a2e4b1451e02\""
+Nov 11 17:48:13 a0.local containerd[6276]: time="2023-11-11T17:48:13.986381461-05:00" level=info msg="StartContainer for \"72d811859581e150353cf3a98d3f6657e5f07988e95096f57f93a2e4b1451e02\""
+Nov 11 17:48:14 a0.local containerd[6276]: time="2023-11-11T17:48:14.078895713-05:00" level=info msg="StartContainer for \"72d811859581e150353cf3a98d3f6657e5f07988e95096f57f93a2e4b1451e02\" returns successfully"
+
+☩ ssh a0 /bin/bash -s < rhel/psk.sh
+@ containerd
+--containerd=/run/containerd/containerd.sock
+--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf
+--kubeconfig=/etc/kubernetes/kubelet.conf
+--config=/var/lib/kubelet/config.yaml
+--container-runtime-endpoint=unix:///var/run/containerd/containerd.sock
+--pod-infra-container-image=registry.k8s.io/pause:3.9
+--
+@ docker
+--containerd=/run/containerd/containerd.sock
+--
+@ etcd
+--advertise-address=192.168.0.83
+--allow-privileged=true
+--authorization-mode=Node,RBAC
+--client-ca-file=/etc/kubernetes/pki/ca.crt
+--enable-admission-plugins=NodeRestriction
+--enable-bootstrap-token-auth=true
+--etcd-cafile=/etc/kubernetes/pki/etcd/ca.crt
+--etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client.crt
+--etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client.key
+--etcd-servers=https://127.0.0.1:2379
+--kubelet-client-certificate=/etc/kubernetes/pki/apiserver-kubelet-client.crt
+--kubelet-client-key=/etc/kubernetes/pki/apiserver-kubelet-client.key
+--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+--proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client.crt
+--proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client.key
+--requestheader-allowed-names=front-proxy-client
+--requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt
+--requestheader-extra-headers-prefix=X-Remote-Extra-
+--requestheader-group-headers=X-Remote-Group
+--requestheader-username-headers=X-Remote-User
+--secure-port=6443
+--service-account-issuer=https://kubernetes.default.svc.cluster.local
+--service-account-key-file=/etc/kubernetes/pki/sa.pub
+--service-account-signing-key-file=/etc/kubernetes/pki/sa.key
+--service-cluster-ip-range=10.96.0.0/12
+--tls-cert-file=/etc/kubernetes/pki/apiserver.crt
+--tls-private-key-file=/etc/kubernetes/pki/apiserver.key
+--advertise-client-urls=https://192.168.0.83:2379
+--cert-file=/etc/kubernetes/pki/etcd/server.crt
+--client-cert-auth=true
+--data-dir=/var/lib/etcd
+--experimental-initial-corrupt-check=true
+--experimental-watch-progress-notify-interval=5s
+--initial-advertise-peer-urls=https://192.168.0.83:2380
+--initial-cluster=a0.local=https://192.168.0.83:2380
+--key-file=/etc/kubernetes/pki/etcd/server.key
+--listen-client-urls=https://127.0.0.1:2379,https://192.168.0.83:2379
+--listen-metrics-urls=http://127.0.0.1:2381
+--listen-peer-urls=https://192.168.0.83:2380
+--name=a0.local
+--peer-cert-file=/etc/kubernetes/pki/etcd/peer.crt
+--peer-client-cert-auth=true
+--peer-key-file=/etc/kubernetes/pki/etcd/peer.key
+--peer-trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
+--snapshot-count=10000
+--trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
+--
+@ kubelet
+--advertise-address=192.168.0.83
+--allow-privileged=true
+--authorization-mode=Node,RBAC
+--client-ca-file=/etc/kubernetes/pki/ca.crt
+--enable-admission-plugins=NodeRestriction
+--enable-bootstrap-token-auth=true
+--etcd-cafile=/etc/kubernetes/pki/etcd/ca.crt
+--etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client.crt
+--etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client.key
+--etcd-servers=https://127.0.0.1:2379
+--kubelet-client-certificate=/etc/kubernetes/pki/apiserver-kubelet-client.crt
+--kubelet-client-key=/etc/kubernetes/pki/apiserver-kubelet-client.key
+--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+--proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client.crt
+--proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client.key
+--requestheader-allowed-names=front-proxy-client
+--requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt
+--requestheader-extra-headers-prefix=X-Remote-Extra-
+--requestheader-group-headers=X-Remote-Group
+--requestheader-username-headers=X-Remote-User
+--secure-port=6443
+--service-account-issuer=https://kubernetes.default.svc.cluster.local
+--service-account-key-file=/etc/kubernetes/pki/sa.pub
+--service-account-signing-key-file=/etc/kubernetes/pki/sa.key
+--service-cluster-ip-range=10.96.0.0/12
+--tls-cert-file=/etc/kubernetes/pki/apiserver.crt
+--tls-private-key-file=/etc/kubernetes/pki/apiserver.key
+--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf
+--kubeconfig=/etc/kubernetes/kubelet.conf
+--config=/var/lib/kubelet/config.yaml
+--container-runtime-endpoint=unix:///var/run/containerd/containerd.sock
+--pod-infra-container-image=registry.k8s.io/pause:3.9
+--
+@ kube-apiserver
+--advertise-address=192.168.0.83
+--allow-privileged=true
+--authorization-mode=Node,RBAC
+--client-ca-file=/etc/kubernetes/pki/ca.crt
+--enable-admission-plugins=NodeRestriction
+--enable-bootstrap-token-auth=true
+--etcd-cafile=/etc/kubernetes/pki/etcd/ca.crt
+--etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client.crt
+--etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client.key
+--etcd-servers=https://127.0.0.1:2379
+--kubelet-client-certificate=/etc/kubernetes/pki/apiserver-kubelet-client.crt
+--kubelet-client-key=/etc/kubernetes/pki/apiserver-kubelet-client.key
+--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+--proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client.crt
+--proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client.key
+--requestheader-allowed-names=front-proxy-client
+--requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt
+--requestheader-extra-headers-prefix=X-Remote-Extra-
+--requestheader-group-headers=X-Remote-Group
+--requestheader-username-headers=X-Remote-User
+--secure-port=6443
+--service-account-issuer=https://kubernetes.default.svc.cluster.local
+--service-account-key-file=/etc/kubernetes/pki/sa.pub
+--service-account-signing-key-file=/etc/kubernetes/pki/sa.key
+--service-cluster-ip-range=10.96.0.0/12
+--tls-cert-file=/etc/kubernetes/pki/apiserver.crt
+--tls-private-key-file=/etc/kubernetes/pki/apiserver.key
+@ kube-controller-manager
+--authentication-kubeconfig=/etc/kubernetes/controller-manager.conf
+--authorization-kubeconfig=/etc/kubernetes/controller-manager.conf
+--bind-address=127.0.0.1
+--client-ca-file=/etc/kubernetes/pki/ca.crt
+--cluster-name=kubernetes
+--cluster-signing-cert-file=/etc/kubernetes/pki/ca.crt
+--cluster-signing-key-file=/etc/kubernetes/pki/ca.key
+--controllers=*,bootstrapsigner,tokencleaner
+--kubeconfig=/etc/kubernetes/controller-manager.conf
+--leader-elect=true
+--requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt
+--root-ca-file=/etc/kubernetes/pki/ca.crt
+--service-account-private-key-file=/etc/kubernetes/pki/sa.key
+--use-service-account-credentials=true
+--
+@ kube-scheduler
+--authentication-kubeconfig=/etc/kubernetes/scheduler.conf
+--authorization-kubeconfig=/etc/kubernetes/scheduler.conf
+--bind-address=127.0.0.1
+--kubeconfig=/etc/kubernetes/scheduler.conf
+--leader-elect=true
+--
+@ kube-proxy
+--config=/var/lib/kube-proxy/config.conf
+--hostname-override=a0.local
+--
+
+```
+
+@ `/etc/kubernetes/admin.json` || `~/.kube/config`
+
+```yaml
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: LS0...S0K
+    server: https://192.168.0.100:8443
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    user: kubernetes-admin
+  name: kubernetes-admin@kubernetes
+current-context: kubernetes-admin@kubernetes
+kind: Config
+preferences: {}
+users:
+- name: kubernetes-admin
+  user:
+    client-certificate-data: LS0...tCg==
+    client-key-data: LS0...LQo=
+```

@@ -1,19 +1,40 @@
-#!/bin/bash
-set -a  # EXPORT ALL ...
+#!/usr/bin/env bash
+#################################################
+# Highly Available (HA) Load Balancer (LB)
+#
+# This script configures a 2-node HA-LB
+# built of HAProxy and Keepalived. 
+#################################################
+# >>>  Modify these settings per environment  <<<
+#################################################
+
+vm_ip(){
+    # Print the IPv4 address of an ssh-configured Host ($1). See ~/.ssh/config.
+    [[ $1 ]] || exit 99
+    echo $(cat ~/.ssh/config |grep -A4 -B2 $1 |grep Hostname |head -n 1 |cut -d' ' -f2)
+}
+
+set -a  # EXPORT ALL
 
 # Environment
-required_files="keepalived.conf check_apiserver.sh haproxy.cfg"
+echo '=== Environment'
+lb_config_files="keepalived.conf check_apiserver.sh haproxy.cfg"
+## Reset these LB-node values per Hypervisor/VM environment 
 ssh_configured_hosts='a0 a1'
-vip='192.168.0.100'
-vip6='0:0:0:0:0:ffff:c0a8:0064'
 lb_1_fqdn='a0.local'
-lb_1_ipv4='192.168.0.83'
 lb_2_fqdn='a1.local'
-lb_2_ipv4='192.168.0.87'
-
-# Add entries of all LB nodes at local /etc/hosts file
-[[ $(grep $lb_1_fqdn /etc/hosts) ]] || echo $lb_1_ipv4 $lb_1_fqdn >> /etc/hosts
-[[ $(grep $lb_2_fqdn /etc/hosts) ]] || echo $lb_2_ipv4 $lb_2_fqdn >> /etc/hosts
+device='eth0' # Applicable network interface device common to all LB nodes
+## VIP must be static and not assignable by DHCP server.
+vip='192.168.0.100' 
+vip6='::ffff:c0a8:64'
+## Get IP address of each LB node from ~/.ssh/config
+lb_1_ipv4=$(vm_ip ${lb_1_fqdn%%.*})
+lb_2_ipv4=$(vm_ip ${lb_2_fqdn%%.*})
+## Smoke test these gotten node-IP values : Abort on fail
+[[ $(echo ${lb_1_ipv4} |cut -d'.' -f4) ]] \
+    || { echo '=== FAIL @ lb_1_ipv4';exit 22; }
+[[ $(echo ${lb_2_ipv4} |cut -d'.' -f4) ]] \
+    || { echo '=== FAIL @ lb_2_ipv4';exit 22; }
 
 _ssh() { 
     mode=$1;shift
@@ -28,36 +49,53 @@ _ssh() {
     done 
 }
 
-set +a  # END EXPORT ALL ...
+set +a  # END EXPORT ALL 
 
-# Set local DNS resolution for LB nodes
-cat <<EOH >etc.hosts
-$lb_1_ipv4 $lb_1_fqdn 
-$lb_2_ipv4 $lb_2_fqdn 
-EOH
-_ssh -x "echo '$(<etc.hosts)' |sudo tee -a /etc/hosts"
 
-# Install required software
+echo "=== @ $(hostname) : Local host DNS : Append HA-LB node entries to /etc/hosts"
+# @ local host, add each LB node entry (once) to /etc/hosts file
+[[ $(grep $lb_1_fqdn /etc/hosts) ]] \
+    || echo $lb_1_ipv4 $lb_1_fqdn >> /etc/hosts
+[[ $(grep $lb_2_fqdn /etc/hosts) ]] \
+    || echo $lb_2_ipv4 $lb_2_fqdn >> /etc/hosts
+cat /etc/hosts
+
+echo '=== @ VMs : Local host DNS : Reset /etc/hosts of each HA-LB node'
+_ssh -x "
+    [[ \$(grep 'localhost $lb_1_fqdn' /etc/hosts) ]] && sudo sed -i 's,localhost $lb_1_fqdn,localhost,' /etc/hosts
+    [[ \$(grep 'localhost $lb_2_fqdn' /etc/hosts) ]] && sudo sed -i 's,localhost $lb_2_fqdn,localhost,' /etc/hosts
+    [[ \$(grep '$lb_1_ipv4 $lb_1_fqdn' /etc/hosts) ]] || { echo '$lb_1_ipv4 $lb_1_fqdn' |sudo tee -a /etc/hosts; }
+    [[ \$(grep '$lb_2_ipv4 $lb_2_fqdn' /etc/hosts) ]] || { echo '$lb_2_ipv4 $lb_2_fqdn' |sudo tee -a /etc/hosts; }
+    echo '@ cat /etc/hosts'
+    cat /etc/hosts
+"
+
+echo '=== Install packages'
 _ssh -x sudo yum -y install keepalived haproxy psmisc 
 
-# Upload required files 
-printf "%s\n" $required_files |xargs -IX /bin/bash -c '_ssh -u $1 .' _ X
+echo '=== Upload HA-LB cfg/conf template files'
+printf "%s\n" $lb_config_files |xargs -IX /bin/bash -c '_ssh -u $1 .' _ X
 
-# Keepalived setup
-## Each SLAVE node (hostname) must have unique "priority" value lower than MASTER.
+echo '=== Keepalived conf'
+## Generate a password common to all the LB nodes
+pass="$(cat /proc/sys/kernel/random/uuid)" 
+##...Static UUIDv5 namespaced (rotated) per day or so would be better.
+## "priority VAL" of each SLAVE must be unique and lower than that of MASTER.
 _ssh -x "
     chmod +x check_apiserver.sh
     sudo cp -p check_apiserver.sh /etc/keepalived/
-    sudo sed -i 's/VIP/$vip/'  /etc/keepalived/check_apiserver.sh
+    sudo sed -i 's/SET_VIP/$vip/' /etc/keepalived/check_apiserver.sh
     sudo cp -p keepalived.conf /etc/keepalived/
-    sudo sed -i 's/VIP/$vip/'  /etc/keepalived/keepalived.conf
+    sudo sed -i 's/SET_DEVICE/$device/' /etc/keepalived/keepalived.conf
+    sudo sed -i 's/SET_PASS/$pass/' /etc/keepalived/keepalived.conf
+    sudo sed -i 's/SET_VIP/$vip/' /etc/keepalived/keepalived.conf
     [[ \$(hostname) == $lb_2_fqdn ]] && {
         sudo sed -i 's/state MASTER/state SLAVE/'  /etc/keepalived/keepalived.conf
         sudo sed -i 's/priority 255/priority 254/' /etc/keepalived/keepalived.conf
     }
 "
 
-# HAProxy setup
+echo '=== HAProxy cfg'
 ## Replace pattern "LB_?_FQDN LB_?_IPV4" with declared values.
 _ssh -x "
     sudo cp -p haproxy.cfg /etc/haproxy/
@@ -72,6 +110,7 @@ _ssh -x '
 '
 
 # Firewalld
+echo '=== Firewalld mods'
 ## Allow VRRP Control Port
 _ssh -x '
     sudo firewall-cmd --permanent --add-port=112/udp 
@@ -92,6 +131,7 @@ _ssh -x "
 _ssh -x sudo firewall-cmd --reload
 
 # Verify VIP
+echo '=== VIP : Verify HA-LB dynamics'
 ## Show 'global secondary' route
 _ssh -x ip -4 addr |grep $vip
 ## Verify connectivity
@@ -100,9 +140,14 @@ _ssh -x ip -4 addr |grep $vip
 [[ $(type -t ping) ]] && {
     echo '
         While ping is running, use the hypervisor 
-        to toggle off each control node (HA LB node).
-        Connectivity should not be interrupted as long as 
-        at least one such node is running.
+        to power off one or more HA-LB nodes.
+        Connectivity should not be interrupted 
+        as long as at least one such node is running.
+
+        Press Enter when ready to test. 
+
+        Ctrl+C to kill.
     '
+    read
     ping -4 $vip 
 } || echo 'Use `ping -4 $vip` to verify HA dynamics (power/toggle VMs).'

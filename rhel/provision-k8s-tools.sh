@@ -36,43 +36,53 @@ _ssh(){
     done 
 }
 
-# Prep hosts 
+echo '@ Prep hosts'
 _ssh -s 'prep-env.sh'
 _ssh -s 'ports-k8s.sh'
 _ssh -s 'ports-istio.sh'
 _ssh -s 'ports-calico.sh'
 _ssh -x 'sudo firewall-cmd --reload'
 
-# Install tc (for kubeadm), and some rudimentary tools lacking in many RHEL-type distros.
-_ssh -x 'sudo dnf -y install iproute-tc bash-completion bind-utils tar wget git jq vim tree'
+echo '@ Install and enable EPEL'
+_ssh -x '
+    sudo dnf -y install epel-release && sudo dnf -y update
+'
+    #sudo /usr/bin/crb enable
 
-# Install yq
+echo '@ Install tc (for kubeadm) and other basic tools.'
+_ssh -x 'sudo dnf -y install iproute-tc bash-completion bind-utils tar nc lsof wget curl git jq vim tree'
+
+# Install yq (jq for yaml)
 ## https://github.com/mikefarah/yq/releases
 VERSION=v4.35.2
 BINARY=yq_linux_amd64
 url="https://github.com/mikefarah/yq/releases/download/${VERSION}/${BINARY}.tar.gz"
 
 _ssh -x "
-    wget $url -O - |tar xz \
+    wget --quiet $url -O - |tar xz \
         && sudo mv ${BINARY} /usr/bin/yq \
         && sudo chown root:root /usr/bin/yq
-        yq --version
+    yq --version
 "
 
 # Install containerd through Docker CE install.
 _ssh -s 'install-containerd-docker-rhel.sh'
 
+# Mods after install of RPM pkgs
+_ssh -s 'post-env.sh'
+
 # Configure containerd to use systemd driver instead of its default (cgroupfs driver).
 _ssh -x "
-    sudo systemctl --now disable containerd.service
     echo '$(<config-cka.toml)' |sudo tee /etc/containerd/config.toml
+    sudo systemctl daemon-reload
     sudo systemctl --now enable containerd.service
+    systemctl status containerd.service
 "
 
 # Configure Docker server to start on boot
 _ssh -x "
     sudo systemctl --now enable docker.service
-    sudo systemctl status docker.service
+    systemctl status docker.service
 "
 
 # Install kubernetes tools

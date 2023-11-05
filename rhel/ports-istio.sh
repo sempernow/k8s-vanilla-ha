@@ -1,4 +1,4 @@
-
+#!/usr/bin/env bash
 ## Istio ports : 150NN : https://istio.io/latest/docs/ops/deployment/requirements/
 ## firewall-cmd is interface to firewalld
 ## HBONE : HTTP Based Overlay Network Environment

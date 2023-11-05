@@ -1,0 +1,12 @@
+#!/bin/env python
+import socket
+
+def ipv4_to_ipv6(ipv4_address):
+    ipv6_address = socket.inet_pton(socket.AF_INET6, "::ffff:" + ipv4_address)
+    return socket.inet_ntop(socket.AF_INET6, ipv6_address)
+
+# Example usage:
+ipv4_address = "192.168.1.1"
+ipv6_address = ipv4_to_ipv6(ipv4_address)
+print("IPv4:", ipv4_address)
+print("IPv6:", ipv6_address)
