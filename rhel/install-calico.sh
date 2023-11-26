@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WIP 
+# WIP  : Operator method
 # https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements
 # CKA Method is manifest method; not advised by Calico:
 # kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml

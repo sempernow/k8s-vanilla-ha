@@ -217,6 +217,7 @@ ansibash cat /etc/haproxy/haproxy.cfg
 
 >Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
 
+(Those uploaded certs are deleted after 2 hours.)
 
 ```bash
 kubeadm init -v 5 --control-plane-endpoint $LOAD_BALANCER_IP:$LOAD_BALANCER_PORT --upload-certs --ignore-preflight-errors=Mem
@@ -265,13 +266,7 @@ kubectl get node
     ```
 - Status of node(s) remains `NotReady` until the "Pod Nework" 
   is configured by installing a CNI-compliant addon such as Calico. 
-  Perform such installs at any Master node.
-    - Calico install How-to is WIP ([`install-calico.sh`](rhel/install-calico.sh)). 
-    The CKA method is dated:
-    ```bash
-    # CKA Method
-    kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-    ```
+  Perform such installs at any Master node. See "Install Pod Network" section.
 
 ### Cluster-init Verify / Troubleshoot  (Pre CNI addon)
 
@@ -314,7 +309,7 @@ cat ~/.kube/config                  # Client
 # Manifests of Static Pods
 ls -hl /etc/kubernetes/manifests
 ```
-- [`psk.sh`](rhel/psk.sh)
+- See `psk`function of [`.bash_functions`](https://github.com/sempernow/home/blob/master/.bash_functions "GitHub/sempernow/home").
 - Also re-check HA load balancer status
     - See that section above
 
