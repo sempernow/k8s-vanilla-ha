@@ -219,7 +219,7 @@ ansibash cat /etc/haproxy/haproxy.cfg
 
 
 ```bash
-kubeadm init --control-plane-endpoint $LOAD_BALANCER_IP:$LOAD_BALANCER_PORT --upload-certs --ignore-preflight-errors=Mem
+kubeadm init -v 5 --control-plane-endpoint $LOAD_BALANCER_IP:$LOAD_BALANCER_PORT --upload-certs --ignore-preflight-errors=Mem
 ```
 
 In our case, on the 1st control-plane node:
@@ -235,7 +235,7 @@ sudo kubeadm init phase preflight -v5 \
 
 # Initialize an HA cluster : save the printed instructions
 vip='192.168.0.100'
-sudo kubeadm init \
+sudo kubeadm init -v 5 \
     --control-plane-endpoint "$vip:8443" \
     --upload-certs \
     --ignore-preflight-errors=Mem \
@@ -254,6 +254,15 @@ kubectl get node
 # NAME       STATUS     ROLES           AGE   VERSION
 # a0.local   NotReady   control-plane   16h   v1.28.3
 ```
+- Certs upload is good for 2hrs. After that, the certs are deleted, 
+  and must be regenerated at an existing control node.
+    ```bash
+    sudo kubeadm init phase upload-certs --upload-certs
+    ```
+    - Requires a new join command
+    ```bash
+    sudo kubeadm token create --print-join-command
+    ```
 - Status of node(s) remains `NotReady` until the "Pod Nework" 
   is configured by installing a CNI-compliant addon such as Calico. 
   Perform such installs at any Master node.
@@ -271,6 +280,11 @@ It spawns all the other core K8s processes,
 and communicates with `kube-apiserver`.
 
 ```bash
+# Re-upload the certs, which last only 2hrs (work from an existing control node)
+sudo kubeadm init phase upload-certs --upload-certs
+# Print the new join command 
+sudo kubeadm token create --print-join-command
+
 # Status of core services
 systemctl status kubelet 
 systemctl status $unit # Units: kubelet containerd docker
@@ -328,6 +342,77 @@ leaving the node (host OS) ready for the next run of "`kubeadm init`".
 
 ```bash
 sudo kubeadm reset
+```
+
+### K8s Network
+
+- Node Network
+    - `https://192.168.0.100:8443` (HA-LB VIP)
+        - Cluster Address is VIP on (External) Node Network
+        - `sudo cat /etc/kubernetes/admin.conf |yq .clusters.[].cluster.server`
+        - `--advertise-address=192.168.0.93`
+            - @ `kubelet`, `kube-apiserver`, `etcd`
+        - E.g., @ `a0.local`
+            ```text
+            ☩ ip -4 addr
+            ...
+            2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> ...
+                inet 192.168.0.93/24 brd 192.168.0.255 scope global ... eth0
+                ...
+                inet 192.168.0.100/24 scope global secondary eth0
+                ...
+            ```
+    - `192.168.0.93` (`a0.local`)
+    - `192.168.0.94` (`a1.local`)
+- Service Cluster CIDR (VIPs) AKA Service IP range AKA Service CIDR
+    - `10.96.0.0/12` (`kubeadm init` default)
+        - `--service-cidr CIDR` 
+            - Declare @ `kubeadm init`
+        - `--service-cluster-ip-range=10.96.0.0/12`
+            - @ `kubelet`, `kube-apiserver`, `etcd`
+- Pod Network CIDR AKA Cluster CIDR
+    - `10.244.0.0/16` (`kubeadm init` default)
+    - `172.16.0.0/12` (`kubeadm init` default alt)
+        - `--pod-network-cidr CIDR`
+            - Declare @ `kubeadm init`
+    - `192.168.0.0/16` (Calico default)
+        - Overlaps with default Gateway CIDR.
+        - Adopts that of `kubeadm init` if set (`--pod-network-cidr`)
+        - At other (non-K8s) deployments, override @ `calico.yaml`
+            ```yaml
+            - name: CALICO_IPV4POOL_CIDR
+              value: "10.10.0.0/16"
+            ```
+
+### K8s Network : process params : `ps aux` (See `psk`)
+
+- @ `etcd`
+    - `--advertise-address=192.168.0.93`
+    - `--advertise-client-urls=https://192.168.0.93:2379`
+    - `--initial-advertise-peer-urls=https://192.168.0.93:2380`
+    - `--initial-cluster=a0.local=https://192.168.0.93:2380`
+    - `--listen-client-urls=https://127.0.0.1:2379,https://192.168.0.93:2379`
+    - `--listen-metrics-urls=http://127.0.0.1:2381`
+    - `--listen-peer-urls=https://192.168.0.93:2380`
+    - `--etcd-servers=https://127.0.0.1:2379`
+    - `--service-cluster-ip-range=10.96.0.0/12`
+
+
+## Install Pod Network 
+
+Calico is a CNI-compliant NetworkPolicy addon that creates and manages the Pod Network.
+It accepts the existing Pod Network CIDR if already set, else defaults to `192.168.0.0/16`, 
+which conflicts with just about every Gateway router/subnet setup on the planet. So, explicitly declare that on cluster initialization:
+
+```bash
+kubeadm init ... --pod-network-cidr "10.10.0.0/16" ...
+```
+
+### [Install Calico by Manifest method](https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises#install-calico-with-kubernetes-api-datastore-50-nodes-or-less)
+
+```bash
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.26.4/manifests/calico.yaml -O
+kubectl apply -f calico.yaml
 ```
 
 ## REFerence : K8s core Processes, Pods and containers
