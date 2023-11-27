@@ -43,7 +43,7 @@ push :
 html : md2html perms
 
 md2html :
-	find . -type f -iname '*.md' -exec md2html.exe {} \;
+	find . -type f ! -path './.git/*' -iname '*.md' -exec md2html.exe {} \;
 
 perms :
 	find . -type f ! -path './.git/*' -iname '*.html' -exec chmod 0644 "{}" \+

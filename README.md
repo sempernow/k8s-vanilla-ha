@@ -204,7 +204,10 @@ ansibash cat /etc/haproxy/haproxy.cfg
 - Per node (`$vm`) by replacing `ansible` with "`ssh $vm`&hellip;".
 
 
-## Cluster Initialization
+## Cluster Initialization 
+
+The cluster is managed as a systemd service by [`kubelet.service`](https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/)
+). The `kubelet` is configured dynamically by `kubeadm init` and `kubeadm join` at runtime. The command options of `kubelet` can be modified afterward. See `/usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf` for more detail.
 
 - On 1st control node:
     - `sudo kubeadm init ...`
@@ -213,7 +216,16 @@ ansibash cat /etc/haproxy/haproxy.cfg
         - With differring command options for 
           workers versus control nodes.
 
-### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/)
+### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/) | [Configuration](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/)
+
+
+REF @ [`kubeadm config print --help`](https://pkg.go.dev/k8s.io/kubernetes@v1.28.4/cmd/kubeadm/app/apis/kubeadm/v1beta3)
+
+>The preferred way to configure `kubeadm` is to pass an YAML configuration file with the `--config` option. Some of the configuration options defined in the `kubeadm` config file are also available as command line flags, but only the most common/simple use case are supported with this approach.
+
+```bash
+kubeadm init --config kubeadm.yaml
+```
 
 >Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
 
@@ -248,7 +260,8 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
 # Verify
 ## Status of kubelet.service (systemd unit)
-systemctl status kubelet
+systemctl status kubelet.service
+
 ## Make request to kube-apiserver  
 ## Expect node "NotReady" due to lack of CNI addon 
 kubectl get node
@@ -339,7 +352,7 @@ leaving the node (host OS) ready for the next run of "`kubeadm init`".
 sudo kubeadm reset
 ```
 
-### K8s Network
+## K8s Network
 
 - Node Network
     - `https://192.168.0.100:8443` (HA-LB VIP)
@@ -372,12 +385,16 @@ sudo kubeadm reset
             - Declare @ `kubeadm init`
     - `192.168.0.0/16` (Calico default)
         - Overlaps with default Gateway CIDR.
-        - Adopts that of `kubeadm init` if set (`--pod-network-cidr`)
+        - Adopts that of `kubeadm init` if set (`--pod-network-cidr`).
         - At other (non-K8s) deployments, override @ `calico.yaml`
             ```yaml
             - name: CALICO_IPV4POOL_CIDR
               value: "10.10.0.0/16"
             ```
+
+>Prior to installing Calico, the core pods have IP addresses matching their node.
+After Calico install, new pods are assigned IPs in the range `172.16.0.0/12`.
+
 
 ### K8s Network : process params : `ps aux` (See `psk`)
 
