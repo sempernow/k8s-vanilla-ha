@@ -226,6 +226,16 @@ REF @ [`kubeadm config print --help`](https://pkg.go.dev/k8s.io/kubernetes@v1.28
 ```bash
 kubeadm init --config kubeadm.yaml
 ```
+```yaml
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+...
+nodeRegistration:
+  ...
+  kubeletExtraArgs:
+    v: 5
+    pod-network-cidr: 172.16.0.0/12
+```
 
 >Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
 
@@ -336,6 +346,17 @@ sudo systemctl restart kubelet.service
 # Last resort : Delete the cluster and start again
 sudo kubeadm reset # See "Cluster Teardown"
 ```
+
+
+### [`kubelet` config](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration) | [Reference](https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/)
+
+The `kubelet.service` is dynamically configured by `kubeadm init|join` at runtime. 
+Afterward, its configuration may be modified through the systemd Drop-in direcotry scheme.
+
+REFs: 
+
+- https://kubernetes.io/docs/tasks/administer-cluster/kubelet-config-file/
+- https://kubernetes.io/docs/tasks/administer-cluster/kubelet-config-file/#kubelet-conf-d
 
 ## Cluster Teardown 
 
