@@ -140,7 +140,7 @@ ssh $vm /bin/bash -s < $script
 
 ## HA Load Balancer | [HAProxy](http://docs.haproxy.org/) | [Keepalived](https://keepalived.org/)
 
->HAProxy and Keepalived are based on Virtual Router Redundancy Protocol (VRRP) that allows all load-balancer nodes to share one virtual IP address (VIP). Connectivity to the VIP is maintained as long as one or more of its nodes are functioning. Our cluster is built with two such nodes that also function as the cluster's control nodes.
+>HAProxy and Keepalived are based on [Virtual Router Redundancy Protocol (VRRP)](https://en.wikipedia.org/wiki/Virtual_Router_Redundancy_Protocol) that allows all load-balancer nodes to share one virtual IP address (VIP). Connectivity to the VIP is maintained as long as one or more of its nodes are functioning. Our cluster is built with two such nodes that also function as the cluster's control nodes.
 
 ### LB Architecture
 
@@ -149,6 +149,7 @@ ssh $vm /bin/bash -s < $script
                          |
                    keepalived VIP
                  192.168.0.100:8443
+          (Virtual Gateway Router per VRRP)
                          |
             -----------------------------
             |                           |
@@ -216,26 +217,49 @@ The cluster is managed as a systemd service by [`kubelet.service`](https://kuber
         - With differring command options for 
           workers versus control nodes.
 
-### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/) | [Configuration](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/)
-
-
-REF @ [`kubeadm config print --help`](https://pkg.go.dev/k8s.io/kubernetes@v1.28.4/cmd/kubeadm/app/apis/kubeadm/v1beta3)
+### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/) | [Configuration](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-InitConfiguration)
 
 >The preferred way to configure `kubeadm` is to pass an YAML configuration file with the `--config` option. Some of the configuration options defined in the `kubeadm` config file are also available as command line flags, but only the most common/simple use case are supported with this approach.
 
 ```bash
-kubeadm init --config kubeadm.yaml
+kubeadm init --config kubeadm-configuration.yaml
 ```
+
+#### `InitConfiguration` @ [`kubeadm-configuration.yaml`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/)
+
+Where command param `--foo-bar=val` `1`
+maps to `foo-bar: val` 
+under the `kubeletExtraArgs` subkey 
+of [`nodeRegistration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-NodeRegistrationOptions) key.
+
+
 ```yaml
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: InitConfiguration
 ...
 nodeRegistration:
   ...
+  # All `kubeadm init` command options : See kubeadm init -h |less
   kubeletExtraArgs:
-    v: 5
-    pod-network-cidr: 172.16.0.0/12
+    v: 5           # Verbosity
+    upload-certs:  # Expires after 2h (along with join command)
+    control-plane-endpoint: 192.168.0.100:8443  # HALB_IP:HALB_PORT 
+    pod-network-cidr:       172.16.0.0/12       # default
+    service-cidr:            10.96.0.0/12       # default
+    service-dns-domain:     cluster.local       # default
 ```
+- `HALB_IP=$(ip -4 addr |grep secondary |awk '{print $2}' |cut -d'/' -f1)`
+
+REFs:
+
+- `kubeadm init --help` : All The Things (all command options)
+    - [`InitConfiguration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-InitConfiguration)
+- `kubeadm join --help` : All The Things (all command options)
+    - [`JoinConfiguration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-JoinConfiguration)
+- [`kubeadm config print --help`](https://pkg.go.dev/k8s.io/kubernetes@v1.28.4/cmd/kubeadm/app/apis/kubeadm/v1beta3) : Whereever configuration is not declared, defaults are used:
+    - `kubeadm config print init-defaults`
+    - `kubeadm config print join-defaults`
+    - `kubeadm config print reset-defaults`
 
 >Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
 
@@ -373,11 +397,13 @@ leaving the node (host OS) ready for the next run of "`kubeadm init`".
 sudo kubeadm reset
 ```
 
-## K8s Network
+## Kubernetes Networking
 
 - Node Network
-    - `https://192.168.0.100:8443` (HA-LB VIP)
-        - Cluster Address is VIP on (External) Node Network
+    - Not under K8s control.
+    - `https://192.168.0.100:8443` (HALB VIP)
+        - Cluster Address is VIP on (External) Node Network.
+            - The HAProxy/Keepalived HALB implements VRRP to affect a virtual gateway router having all the control nodes as its clients.
         - `sudo cat /etc/kubernetes/admin.conf |yq .clusters.[].cluster.server`
         - `--advertise-address=192.168.0.93`
             - @ `kubelet`, `kube-apiserver`, `etcd`
@@ -393,13 +419,13 @@ sudo kubeadm reset
             ```
     - `192.168.0.93` (`a0.local`)
     - `192.168.0.94` (`a1.local`)
-- Service Cluster CIDR (VIPs) AKA Service IP range AKA Service CIDR
+- "Service CIDR" (VIPs) AKA "Service Cluster CIDR" AKA "Service IP range"
     - `10.96.0.0/12` (`kubeadm init` default)
         - `--service-cidr CIDR` 
-            - Declare @ `kubeadm init`
+            - @ `kubeadm init`
         - `--service-cluster-ip-range=10.96.0.0/12`
             - @ `kubelet`, `kube-apiserver`, `etcd`
-- Pod Network CIDR AKA Cluster CIDR
+- "Pod Network CIDR" AKA "Cluster Network CIDR" 
     - `10.244.0.0/16` (`kubeadm init` default)
     - `172.16.0.0/12` (`kubeadm init` default alt)
         - `--pod-network-cidr CIDR`
