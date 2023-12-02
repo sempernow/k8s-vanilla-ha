@@ -227,7 +227,7 @@ kubeadm init --config kubeadm-configuration.yaml
 
 #### `InitConfiguration` @ [`kubeadm-configuration.yaml`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/)
 
-Where command param `--foo-bar=val` `1`
+Where command param `--foo-bar=val`
 maps to `foo-bar: val` 
 under the `kubeletExtraArgs` subkey 
 of [`nodeRegistration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-NodeRegistrationOptions) key.
