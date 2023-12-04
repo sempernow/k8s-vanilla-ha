@@ -1,0 +1,77 @@
+## @ https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+# @ https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: "192.168.0.100"
+  bindPort: 8443
+nodeRegistration: # This node only
+  ignorePreflightErrors:
+  - Mem
+  - Port-8443
+  imagePullPolicy: IfNotPresent
+  criSocket: unix:///var/run/containerd/containerd.sock
+  #name: node
+  #taints: null # Default taints
+  #taints: []   # No taints
+  kubeletExtraArgs: # See kubelet --help
+    v: "5" 
+    pod-cidr: "10.10.0.0/12" # Default 172.16.0.0/12
+    cgroup-driver: "systemd" # Advised for containerd
+
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+# @ https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-ClusterConfiguration
+kubernetesVersion: "1.28.4"
+controlPlaneEndpoint: "192.168.0.100:8443"
+#imageRepository: "registry.k8s.io"
+networking:
+  #dnsDomain: cluster.local
+  podSubnet: "10.10.0.0/12"
+  serviceSubnet: "10.55.0.0/16" # Default "10.96.0.0/12"
+
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+# @ https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration
+cgroupDriver: systemd # systemd || cgroupfs
+imageGCHighThresholdPercent: 85 # Default
+imageGCLowThresholdPercent: 80  # Default
+## TLS Params : See https://pkg.go.dev/crypto/tls#pkg-constants
+#tlsCipherSuites: []
+# tlsMinVersion: VersionTLS12 #... VersionTLS12 || VersionTLS13 
+
+# ---
+# apiVersion: kubeproxy.config.k8s.io/v1alpha1
+# kind: KubeProxyConfiguration
+# ---
+# apiVersion: kubeadm.k8s.io/v1beta3
+# kind: JoinConfiguration
+# # @ https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-JoinConfiguration
+## MUST contain discovery.bootstrapToken
+# discovery:
+#   bootstrapToken:
+#     apiServerEndpoint: kube-apiserver:6443
+#     token: abcdef.0123456789abcdef
+#     unsafeSkipCAVerification: true
+#   timeout: 5m0s
+#   tlsBootstrapToken: abcdef.0123456789abcdef
+
+# controlPlane:
+#   localAPIEndpoint:
+#     advertiseAddress: "192.168.0.100"
+#     bindPort: 8443
+# nodeRegistration: # This node only
+#   ignorePreflightErrors:
+#   - Mem
+#   imagePullPolicy: IfNotPresent
+#   criSocket: unix:///var/run/containerd/containerd.sock
+#   #name: node
+#   #taints: null # Default taints
+#   #taints: []   # No taints
+#   kubeletExtraArgs: # See kubelet --help
+#     v: "5"            
+#     pod-cidr: "10.10.0.0/12" # Default 172.16.0.0/12
+#     cgroup-driver: "systemd" # Advised for containerd
+

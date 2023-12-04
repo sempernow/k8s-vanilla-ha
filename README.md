@@ -140,7 +140,7 @@ ssh $vm /bin/bash -s < $script
 
 ## HA Load Balancer | [HAProxy](http://docs.haproxy.org/) | [Keepalived](https://keepalived.org/)
 
->HAProxy and Keepalived are based on [Virtual Router Redundancy Protocol (VRRP)](https://en.wikipedia.org/wiki/Virtual_Router_Redundancy_Protocol) that allows all load-balancer nodes to share one virtual IP address (VIP). Connectivity to the VIP is maintained as long as one or more of its nodes are functioning. Our cluster is built with two such nodes that also function as the cluster's control nodes.
+>HAProxy and Keepalived utilize [Virtual Router Redundancy Protocol (VRRP)](https://en.wikipedia.org/wiki/Virtual_Router_Redundancy_Protocol) to implement a virtual Gateway Router having an IP address of VIP, and all the control nodes as its clients, load balancing requests to them. Connectivity to the VIP is maintained as long as one or more of its nodes are functioning. Our cluster is built with two such nodes that also function as the cluster's control nodes.
 
 ### LB Architecture
 
@@ -149,18 +149,18 @@ ssh $vm /bin/bash -s < $script
                          |
                    keepalived VIP
                  192.168.0.100:8443
-          (Virtual Gateway Router per VRRP)
+              (Virtual Gateway Router)
                          |
             -----------------------------
             |                           |
-    a0: 192.168.0.83            a1: 192.168.0.87
+    a0: 192.168.0.93            a1: 192.168.0.94
     haproxy: 8443               haproxy: 8443        
     kube-apiserver: 6443        kube-apiserver: 6443 
 ```
-- VIP is the (highly-available) K8s control-plane endpoint.
-- For LAN access, protect VIP from gateway router's dynamic assignments
-(if VIP address is in the DHCP server's client range)
-by adding the VIP to router's DHCP Address Reservation list. 
+- VIP is the (highly-available) K8s control-plane endpoint
+- For LAN access, protect VIP from downstream DHCP assignments
+  (if VIP address is in the DHCP server's client range)
+  by adding the VIP to the DHCP server's Address Reservation list. 
     - VIP: `192.168.0.100` (Admin selects)
     - MAC: `FE-4D-0F-3B-76-9F` (bogus)
 - HAProxy runs on each HA LB (K8s master) node to provide access at `*:8443` for all nodes.
@@ -217,49 +217,178 @@ The cluster is managed as a systemd service by [`kubelet.service`](https://kuber
         - With differring command options for 
           workers versus control nodes.
 
-### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/) | [Configuration](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-InitConfiguration)
+### [cgroup drivers](https://kubernetes.io/docs/setup/production-environment/container-runtimes/#cgroup-drivers) : `systemd` or `cgroupfs`
 
->The preferred way to configure `kubeadm` is to pass an YAML configuration file with the `--config` option. Some of the configuration options defined in the `kubeadm` config file are also available as command line flags, but only the most common/simple use case are supported with this approach.
+On Linux, control groups constrain resources that are allocated to processes.
+The `kubelet` and the underlying container runtime need to interface with cgroups to enforce resource management for pods and containers which includes cpu/memory requests and limits for containerized workloads. There are **two versions** of cgroups in Linux: cgroup v1 and cgroup v2. cgroup v2 is the new generation of the cgroup API.
+
+Identify the cgroup version on Linux Nodes
 
 ```bash
-kubeadm init --config kubeadm-configuration.yaml
+stat -fc %T /sys/fs/cgroup/
+```
+- For cgroup v2, the output is `cgroup2fs`.
+- For cgroup v1, the output is `tmpfs`.
+
+~~If cgroup v1, then set `kubelet` flag `--cgroup-driver` to `systemd`, else set to `cgroupfs`.~~
+Should match the container runtime setting, and if the parent processes are `systemd`, then should use that. 
+
+### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/) | [Configuration](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-InitConfiguration)
+
+>The preferred way to configure `kubeadm` is to pass an YAML configuration file with the `--config` option. Some of the configuration options defined in the [`kubeadm-config.yaml`](rhel/kubeadm-config.yaml) file are also available as command line flags, but only the most common/simple use case are supported with this approach.
+
+~~Map any commandline option "`--foo-bar=val`" to YAML key "`fooBar: val`".~~ Wrong. Can't do that. How to map, and even if they can be mapped, remains an undocumented mystery.
+
+```bash
+kubeadm config validate --config kubeadm-config.yaml
+kubeadm init --config kubeadm-config.yaml
 ```
 
-#### `InitConfiguration` @ [`kubeadm-configuration.yaml`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/)
+#### `ClusterConfiguration` / `InitConfiguration` @ [`kubeadm-config.yaml`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/)
 
-Where command param `--foo-bar=val`
-maps to `foo-bar: val` 
-under the `kubeletExtraArgs` subkey 
-of [`nodeRegistration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-NodeRegistrationOptions) key.
+The configuration file used during `kubeadm init --config ...` [must include a `kind: ClusterConfiguration` document](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/#config-file). It may include all the following documents:
 
+@ `kubeadm-config.yaml`
 
 ```yaml
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: InitConfiguration
 ...
+--- 
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+...
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+# @ https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration
+cgroupDriver: systemd # systemd || cgroupfs
+imageGCHighThresholdPercent: 85 # Default
+imageGCLowThresholdPercent: 80  # Default
+...
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+...
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: JoinConfiguration
+...
+```
+
+@ `ClusterConfiguration` example
+
+```yaml
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+#imageRepository: "registry.k8s.io"
+kubernetesVersion: "1.28.4"
+controlPlaneEndpoint: "192.168.0.100:8443"
+networking:
+  podSubnet: "10.10.0.0/12"
+  serviceSubnet: "10.55.0.0/16"
+
+```
+
+@ `InitConfiguration` example
+
+```yaml
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+imagePullPolicy: IfNotPresent # default
+ignorePreflightErrors: ["Mem"]
+taints:      # Defaults to control-plane taint for control-plane nodes
+#taints: []  # No taints on conrtol-plane nodes if set to empty array; []
+localAPIEndpoint:
+  advertiseAddress: "192.168.0.100:8443" 
+  bindPort: 8443
 nodeRegistration:
-  ...
-  # All `kubeadm init` command options : See kubeadm init -h |less
+  # All `kubelet` command options : See kubelet -h |less
   kubeletExtraArgs:
     v: 5           # Verbosity
+    image-repository: registry.k8s.io # Default
     upload-certs:  # Expires after 2h (along with join command)
     control-plane-endpoint: 192.168.0.100:8443  # HALB_IP:HALB_PORT 
-    pod-network-cidr:       172.16.0.0/12       # default
-    service-cidr:            10.96.0.0/12       # default
-    service-dns-domain:     cluster.local       # default
+    pod-cidr:           10.10.0.0/12        # Default is 172.16.0.0/12
+    service-cidr:       10.55.0.0/16        # Default is 10.96.0.0/12
+    service-dns-domain: cluster.local       # Default
 ```
+- The [`nodeRegistration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-NodeRegistrationOptions) subkey "`kubeletExtraArgs: []`" accepts all commandline parameters of "`kubelet`". Map the commandline syntax  "`--foo-bar=val`"  to "`foo-bar: val`" under that subkey.
 - `HALB_IP=$(ip -4 addr |grep secondary |awk '{print $2}' |cut -d'/' -f1)`
 
 REFs:
-
-- `kubeadm init --help` : All The Things (all command options)
-    - [`InitConfiguration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-InitConfiguration)
+- `kubelet --help` : To list all command options
+- `kubeadm init --help` : To list all `init` command options of `kubeadm`
+    - [`kind: InitConfiguration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-InitConfiguration)
+    - [`kind: ClusterConfiguration`] : uploaded to ConfigMap `kubeadm-config` in Namespace `kube-system`. And then read during `kubeadm join`, `kubeadm upgrade`, and `kubeadm reset`.
 - `kubeadm join --help` : All The Things (all command options)
     - [`JoinConfiguration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-JoinConfiguration)
-- [`kubeadm config print --help`](https://pkg.go.dev/k8s.io/kubernetes@v1.28.4/cmd/kubeadm/app/apis/kubeadm/v1beta3) : Whereever configuration is not declared, defaults are used:
+- [`kubeadm config print --help`](https://pkg.go.dev/k8s.io/kubernetes@v1.28.4/cmd/kubeadm/app/apis/kubeadm/v1beta3) : Whereever configuration is not declared, defaults are used. Their manifests are printed by:
     - `kubeadm config print init-defaults`
+        ```yaml
+        apiVersion: kubeadm.k8s.io/v1beta3
+        kind: InitConfiguration
+        bootstrapTokens:
+        - groups:
+          - system:bootstrappers:kubeadm:default-node-token
+          token: abcdef.0123456789abcdef
+          ttl: 24h0m0s
+          usages:
+          - signing
+          - authentication
+        localAPIEndpoint:
+          advertiseAddress: 1.2.3.4
+          bindPort: 6443
+        nodeRegistration:
+          criSocket: unix:///var/run/containerd/containerd.sock
+          imagePullPolicy: IfNotPresent
+          name: node
+          taints: null
+        ---
+        apiVersion: kubeadm.k8s.io/v1beta3
+        kind: ClusterConfiguration
+        apiServer:
+          timeoutForControlPlane: 4m0s
+        certificatesDir: /etc/kubernetes/pki
+        clusterName: kubernetes
+        controllerManager: {}
+        dns: {}
+        etcd:
+          local:
+            dataDir: /var/lib/etcd
+        imageRepository: registry.k8s.io
+        kubernetesVersion: 1.28.0
+        networking:
+          dnsDomain: cluster.local
+          serviceSubnet: 10.96.0.0/12
+        scheduler: {}
+        ```
     - `kubeadm config print join-defaults`
+        ```yaml
+        apiVersion: kubeadm.k8s.io/v1beta3
+        kind: JoinConfiguration
+        caCertPath: /etc/kubernetes/pki/ca.crt
+        discovery:
+          bootstrapToken:
+            apiServerEndpoint: kube-apiserver:6443
+            token: abcdef.0123456789abcdef
+            unsafeSkipCAVerification: true
+          timeout: 5m0s
+          tlsBootstrapToken: abcdef.0123456789abcdef
+        nodeRegistration:
+          criSocket: unix:///var/run/containerd/containerd.sock
+          imagePullPolicy: IfNotPresent
+          name: a0.local
+          taints: null
+        ```
     - `kubeadm config print reset-defaults`
+        ```yaml
+        apiVersion: kubeadm.k8s.io/v1beta4
+        kind: ResetConfiguration
+        criSocket: unix:///var/run/containerd/containerd.sock
+        certificatesDir: /etc/kubernetes/pki
+        ```
 
 >Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
 
@@ -280,10 +409,13 @@ sudo kubeadm init phase preflight -v5 \
     --ignore-preflight-errors=Mem \
     |& tee kubeadm.init.phase.preflight.$(hostname).log
 
-# Initialize an HA cluster : save the printed instructions
+# Initialize an HA cluster imperatively : Delete `--dry-run` line when ready.
 vip='192.168.0.100'
-sudo kubeadm init -v 5 \
+sudo kubeadm init -v5 \
+    --dry-run \
     --control-plane-endpoint "$vip:8443" \
+    --pod-network-cidr "10.10.0.0/12" \
+    --service-cidr "10.55.0.0/16" \
     --upload-certs \
     --ignore-preflight-errors=Mem \
     |& tee kubeadm.init.$(hostname).log
@@ -397,6 +529,25 @@ leaving the node (host OS) ready for the next run of "`kubeadm init`".
 sudo kubeadm reset
 ```
 
+@ Admin machine (Windows/WSL)
+
+```bash
+# Teardown
+export ANSIBASH_TARGET_LIST='a0 a1 a2 a3'
+ansibash 'sudo kubeadm reset'a
+ansibash 'rm -rf ~/.kube/*'
+
+# Verify
+ansibash 'ls -hal ~/.kube'
+ansibash 'ls -hl /etc/kubernetes/manifests'
+ansibash 'psk'
+ansibash 'systemctl status kubelet.service'
+ansibash 'systemctl status kubelet.service |tail -n 3'
+
+# Prep for init
+ansibash 'sudo reboot'
+```
+
 ## Kubernetes Networking
 
 - Node Network
@@ -404,6 +555,8 @@ sudo kubeadm reset
     - `https://192.168.0.100:8443` (HALB VIP)
         - Cluster Address is VIP on (External) Node Network.
             - The HAProxy/Keepalived HALB implements VRRP to affect a virtual gateway router having all the control nodes as its clients.
+                - The VIP should lie outside the subnet's DHCP-server range,
+                  else a reserved (static) address therein.
         - `sudo cat /etc/kubernetes/admin.conf |yq .clusters.[].cluster.server`
         - `--advertise-address=192.168.0.93`
             - @ `kubelet`, `kube-apiserver`, `etcd`
@@ -419,19 +572,22 @@ sudo kubeadm reset
             ```
     - `192.168.0.93` (`a0.local`)
     - `192.168.0.94` (`a1.local`)
-- "Service CIDR" (VIPs) AKA "Service Cluster CIDR" AKA "Service IP range"
+- "Service Subnet" AKA "Service CIDR" AKA "Service Cluster-IP Range" AKA "Service-Cluster CIDR" 
     - `10.96.0.0/12` (`kubeadm init` default)
         - `--service-cidr CIDR` 
             - @ `kubeadm init`
         - `--service-cluster-ip-range=10.96.0.0/12`
             - @ `kubelet`, `kube-apiserver`, `etcd`
-- "Pod Network CIDR" AKA "Cluster Network CIDR" 
+    - Virtual IPs (VIPs) per Service, 
+      providing a stable IP address  for all
+- "Pod Subnet" AKA "Pod-Network CIDR" AKA "Pod CIDR" AKA "Cluster CIDR"  AKA "Cluster-Network CIDR"
     - `10.244.0.0/16` (`kubeadm init` default)
     - `172.16.0.0/12` (`kubeadm init` default alt)
+    - `10.10.0.0/16` (commonly chosen alt) 
         - `--pod-network-cidr CIDR`
             - Declare @ `kubeadm init`
     - `192.168.0.0/16` (Calico default)
-        - Overlaps with default Gateway CIDR.
+        - Overlaps with a common default Node CIDR.
         - Adopts that of `kubeadm init` if set (`--pod-network-cidr`).
         - At other (non-K8s) deployments, override @ `calico.yaml`
             ```yaml
@@ -439,29 +595,73 @@ sudo kubeadm reset
               value: "10.10.0.0/16"
             ```
 
->Prior to installing Calico, the core pods have IP addresses matching their node.
-After Calico install, new pods are assigned IPs in the range `172.16.0.0/12`.
+Select from the Private Address Space ([RFC-1918](https://www.ietf.org/rfc/rfc1918.txt)) 
+for all cluster-internal CIDRs; for both Service and Pod CIDRs.
 
+         10.0.0.0    - 10.255.255.255  (10/8 prefix)
+         172.16.0.0  - 172.31.255.255  (172.16/12 prefix)
+         192.168.0.0 - 192.168.255.255 (192.168/16 prefix)
 
-### K8s Network : process params : `ps aux` (See `psk`)
+>Failing to explicitly declare Service and Pod CIDRs upon "`kubeadm init`" may result in those CIDRs overlapping with that of the (pre-existing) node network. For example, after one such install, prior to installing Calico, the core pods were assigned IP addresses in the CIDR of the node (in the subnet's DHCP-server range). After Calico install, new pods were assigned IPs in a different (better) CIDR (`172.16.0.0/12`).
 
-- @ `etcd`
-    - `--advertise-address=192.168.0.93`
-    - `--advertise-client-urls=https://192.168.0.93:2379`
-    - `--initial-advertise-peer-urls=https://192.168.0.93:2380`
-    - `--initial-cluster=a0.local=https://192.168.0.93:2380`
-    - `--listen-client-urls=https://127.0.0.1:2379,https://192.168.0.93:2379`
-    - `--listen-metrics-urls=http://127.0.0.1:2381`
-    - `--listen-peer-urls=https://192.168.0.93:2380`
-    - `--etcd-servers=https://127.0.0.1:2379`
-    - `--service-cluster-ip-range=10.96.0.0/12`
+### TLS Cipher Suites 
 
+Configuration isssues regarding network admins placing restrictions,
+limiting cipher suites to their "allowed" list:
+
+- TLS 1.2
+    - An unallowed cipher is mandated for use at HTTP/2 spec (`RFC-7540`).
+        - `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`
+        - Unable to disable HTTP/2 using `crypto/tls` pkg, 
+          and if able may cause cluster comms problems.
+- TLS 1.3 (`RFC-8446`)
+    - An unallowed cipher is mandated (with qualifier) for use per spec.
+    - Cipher suites for this TLS version are not configurable at either `crypto/tls` pkg 
+      or Kubernetes [`KubeletConfiguration.tlsCipherSuites: []`](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration)
+
+REFs:
+
+- [IANA : TLS Parameters](https://www.iana.org/assignments/tls-parameters/tls-parameters.xml)
+- HTTP/2 : [RFC-7540](https://www.rfc-editor.org/rfc/rfc7540#section-9.2.2)
+- TLS 1.3 : [RFC-8446](https://www.rfc-editor.org/rfc/rfc8446.html#section-9.1)
+- [`crypto/tls` (`go1.20.11`)](https://pkg.go.dev/crypto/tls@go1.20.11) 
+    - [TLS Cipher Suites @ `crypto/tls`](https://tip.golang.org/blog/tls-cipher-suites)
+    - @ TLS 1.3, its cipher suites are [not configurable](https://github.com/golang/go/issues/29349) 
+    - [FIPS-verified version](https://stackoverflow.com/questions/68433362/go-dev-boringcrypto-branch-x-crypto-library-fips-140-2-compliance)
+        ```text
+        The dev.boringcrypto branch of Go replaces the built-in crypto modules with a FIPS-verified version:
+        ```
+        - [BoringSSL](https://boringssl.googlesource.com/boringssl/)
+-  [`kube-apiserver` command options](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)
+    - @ `/etc/kubernetes/manifests/kube-apiserver.yaml`
+    ```yaml
+    spec:
+    containers:
+    - command:
+        - kube-apiserver
+        ## Default
+        - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+        ## Fails to disable HTTP/2.
+        #- --feature-gates=AllAlpha=false
+        ## TLS settings:
+        - --tls-cert-file=/etc/kubernetes/pki/apiserver.crt
+        - --tls-private-key-file=/etc/kubernetes/pki/apiserver.key
+        ## Ciphers are not configurable at TLS 1.3 of Golang's crypto/tls package.
+        #- --tls-min-version=VersionTLS13 
+        #- --tls-cipher-suites=TLS_AES_256_GCM_SHA384
+        #...
+    ```
+
+## K8s process params : `ps aux` (See `psk`)
 
 ## Install Pod Network 
 
-Calico is a CNI-compliant NetworkPolicy addon that creates and manages the Pod Network.
-It accepts the existing Pod Network CIDR if already set, else defaults to `192.168.0.0/16`, 
-which conflicts with just about every Gateway router/subnet setup on the planet. So, explicitly declare that on cluster initialization:
+Calico is a CNI-compliant NetworkPolicy addon that creates 
+and manages the Pod Network AKA Cluster Network.
+It accepts the existing Pod Network CIDR if already set, 
+else defaults to `192.168.0.0/16`, 
+which often conflicts with the subnet CIDR of node(s). 
+So, explicitly declare the Pod Network CIDR on cluster initialization:
 
 ```bash
 kubeadm init ... --pod-network-cidr "10.10.0.0/16" ...
