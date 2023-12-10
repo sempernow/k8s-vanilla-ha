@@ -6,6 +6,7 @@
 # Calico advises Operator method:
 # https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises
 # 
+
 exit # WIP
 
 # Operator Method
@@ -14,7 +15,7 @@ export calico_manifests='https://raw.githubusercontent.com/projectcalico/calico/
 kubectl create -f $calico_manifests/tigera-operator.yaml
 
 ## 2. Download CRDs
-curl $calico_manifests/custom-resources.yaml -O
+wget -nv $calico_manifests/custom-resources.yaml
 ## Modify calico.yaml
 ### https://docs.tigera.io/calico/latest/reference/installation/api
 ## Install CRDs

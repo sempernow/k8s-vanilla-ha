@@ -80,6 +80,22 @@ during package install operations.
 ### @ Air-gap Install : Muster Assets
 
 - Target machines must have 10GB+ @ `/var/local/repos`
+- Images must be saved; `docker save ...`
+- Target machines must have access to local Docker Registry
+  that is loaded with the images.
+
+#### The easy way 
+
+```bash
+mkdir k8s-air-gap-install
+cd k8s-air-gap-install
+sudo kubeadm config images pull |& tee kubeadm.config.images.pull.log
+sudo dnf download -y --resolve --alldeps #... See provisioning scripts
+```
+- Includes dependencies already installed on this box, 
+  but attempted install on target does no harm.
+
+#### The hard way
 
 Steps
 
@@ -390,13 +406,16 @@ REFs:
         certificatesDir: /etc/kubernetes/pki
         ```
 
->Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
-
-(Those uploaded certs are deleted after 2 hours.)
+### Cluster Init
 
 ```bash
 kubeadm init -v 5 --control-plane-endpoint $LOAD_BALANCER_IP:$LOAD_BALANCER_PORT --upload-certs --ignore-preflight-errors=Mem
 ```
+
+>Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
+
+(Those uploaded certs are deleted after 2 hours.)
+
 
 In our case, on the 1st control-plane node:
 
@@ -410,14 +429,17 @@ sudo kubeadm init phase preflight -v5 \
     |& tee kubeadm.init.phase.preflight.$(hostname).log
 
 # Initialize an HA cluster imperatively : Delete `--dry-run` line when ready.
-vip='192.168.0.100'
+## All CIDRs are in the Private Address Space (RFC-1918)
+vipp='192.168.0.100:8443'
+pnet='10.10.0.0/12'
+snet='10.55.0.0/16'
+
 sudo kubeadm init -v5 \
-    --dry-run \
-    --control-plane-endpoint "$vip:8443" \
-    --pod-network-cidr "10.10.0.0/12" \
-    --service-cidr "10.55.0.0/16" \
     --upload-certs \
     --ignore-preflight-errors=Mem \
+    --control-plane-endpoint "$vipp" \
+    --pod-network-cidr "$pnet" \
+    --service-cidr "$snet" \
     |& tee kubeadm.init.$(hostname).log
 
 # Configure the client (kubectl)
@@ -526,18 +548,32 @@ Yet the RPM package installations, Docker images and such are unharmed,
 leaving the node (host OS) ready for the next run of "`kubeadm init`". 
 
 ```bash
+sudo kubeadm cordon $node
+sudo kubeadm drain $node
+kubectl delete -f calico.yaml
+kubectl get deploy -A |xargs -IX -c /bin/bash -c 'kubectl delete ' _ X
 sudo kubeadm reset
+sudo systemctl disable --now containerd.service
+sudo rm -rf /var/lib/containerd/*
+rm -rf ~/.kube/*
 ```
 
 @ Admin machine (Windows/WSL)
 
 ```bash
 # Teardown
+## Environment
 export ANSIBASH_TARGET_LIST='a0 a1 a2 a3'
+
+## Delete all addons
+ansibash 'kubectl delete -f calico.yaml'
+
+
+## Delete K8s core
 ansibash 'sudo kubeadm reset'a
 ansibash 'rm -rf ~/.kube/*'
 
-# Verify
+## Verify
 ansibash 'ls -hal ~/.kube'
 ansibash 'ls -hl /etc/kubernetes/manifests'
 ansibash 'psk'
@@ -670,8 +706,10 @@ kubeadm init ... --pod-network-cidr "10.10.0.0/16" ...
 ### [Install Calico by Manifest method](https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises#install-calico-with-kubernetes-api-datastore-50-nodes-or-less)
 
 ```bash
-curl https://raw.githubusercontent.com/projectcalico/calico/v3.26.4/manifests/calico.yaml -O
+ver='3.26.4'
+wget -q https://raw.githubusercontent.com/projectcalico/calico/v${ver}/manifests/calico.yaml
 kubectl apply -f calico.yaml
+
 ```
 
 ## REFerence : K8s core Processes, Pods and containers

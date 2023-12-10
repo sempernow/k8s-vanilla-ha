@@ -3,26 +3,27 @@
 # etcd, etcdctl, etcdutl : https://github.com/etcd-io/etcd 
 # Releases : https://github.com/etcd-io/etcd/releases/
 
-## Prep
+# Prep
 
-# @ https://github.com/etcd-io/etcd/releases
-ETCD_VER=v3.5.10
+ver=v3.5.10
+arch=amd64
+tarball="etcd-${ver}-linux-${arch}.tar.gz"
 
-### Choose either URL
+## Either URL ok
 GOOGLE_URL=https://storage.googleapis.com/etcd
 GITHUB_URL=https://github.com/etcd-io/etcd/releases/download
-DOWNLOAD_URL=${GITHUB_URL}
+DOWNLOAD_URL="${GITHUB_URL}"
 
 tmpdir=/tmp/etcd-io
+
 rm -rf $tmpdir
-mkdir $tmpdir
+mkdir -p $tmpdir
 
 ## Download and extract to $tmpdir
-curl -L ${DOWNLOAD_URL}/${ETCD_VER}/etcd-${ETCD_VER}-linux-amd64.tar.gz \
-    -o /tmp/etcd-${ETCD_VER}-linux-amd64.tar.gz \
-    && tar xzvf /tmp/etcd-${ETCD_VER}-linux-amd64.tar.gz -C $tmpdir --strip-components=1 
+wget -nv ${DOWNLOAD_URL}/${ver}/$tarball -O /tmp/$tarball \
+    && tar -xzv -C $tmpdir --strip-components=1 -f /tmp/$tarball
 
-## Install from $tmpdir to /usr/bin/
+# Install binaries from $tmpdir into /usr/bin/
 printf "%s\n" etcd etcdctl etcdutl |xargs -IX /bin/bash -c \
     '
         [[ -f $0/$1 ]] && sudo mv $0/$1 /usr/bin/$1 \
@@ -30,6 +31,7 @@ printf "%s\n" etcd etcdctl etcdutl |xargs -IX /bin/bash -c \
     ' $tmpdir X
 
 ## Verify
+echo '=== etcd + tools are installed:'
 ls -Ahl /usr/bin/etc*
 etcd --version
 etcdctl version

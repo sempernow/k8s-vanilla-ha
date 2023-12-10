@@ -1,47 +1,34 @@
 #!/usr/bin/env bash
 # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/#installing-kubeadm-kubelet-and-kubectl
 
-# Add Kubernetes yum repo 
-# Exclude tools (exclude) from upgrade on `yum update`
-cat <<EOF |sudo tee /etc/yum.repos.d/kubernetes.repo
-[kubernetes]
-name=Kubernetes
-baseurl=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/
-enabled=1
-gpgcheck=1
-gpgkey=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key
-exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
-EOF
-sudo dnf -y update
-# Install tools : kubeadm kubelet kubectl crictl
+[[ $(dnf repolist |grep kubernetes) ]] || {
+	echo '=== Add the Kubernetes repo'
+	ver='1.28'
+	url=https://pkgs.k8s.io/core:/stable:/v${ver}/rpm
+	# >>>  MUST PRESERVE TABs at HEREDOC lines  <<<
+	cat <<-EOH |sudo tee /etc/yum.repos.d/kubernetes.repo
+	[kubernetes]
+	name=Kubernetes
+	baseurl=${url}/
+	enabled=1
+	gpgcheck=1
+	gpgkey=${url}/repodata/repomd.xml.key
+	exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+	EOH
+	sudo dnf -y update
+}
+
+echo '=== Install K8s-core tools : kubelet, kubeadm, kubectl'
 sudo dnf -y install kubelet kubeadm kubectl --disableexcludes=kubernetes
-sudo systemctl enable --now kubelet
 
-# # Install cri-tools : crictl 
-# # https://github.com/kubernetes-sigs/cri-tools
-## UPDATE : Moved : See setup-containerd-rhel.sh
-# VERSION="v1.28.0"
-# wget https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz
-# sudo tar zxvf crictl-$VERSION-linux-amd64.tar.gz -C /usr/local/bin
-# rm -f crictl-$VERSION-linux-amd64.tar.gz
+kubelet --version >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ kubelet install'; exit 10; }
+kubeadm version >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ kubeadm install'; exit 11; }
+kubectl version >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ kubectl install'; exit 12; }
 
-# Configure OS
-## UPDATE : Moved : See prep-env.sh and setup-containerd-rhel.sh
-## Set SELinux in permissive mode (effectively disabling it)
-# sudo setenforce 0
-# sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+echo '=== Enable/Start kubelet.service'
+sudo systemctl enable --now kubelet.service
 
-## Turn off swap
-# sudo swapoff -a
-# sudo sed -i 's/\/swap/#\/swap/' /etc/fstab
-
-## Set iptables bridging (@ setup-containerd-rhel.sh)
-# cat <<EOF |sudo tee /etc/sysctl.d/k8s.conf
-# net.bridge.bridge-nf-call-ip6tables = 1
-# net.bridge.bridge-nf-call-iptables = 1
-# EOF
-# sudo sysctl --system
-
-## UPDATE : Moved : See prep-env.sh and setup-containerd-rhel.sh
-#sudo crictl config --set \
-#    runtime-endpoint=unix:///run/containerd/containerd.sock
+echo '=== K8s-core tools are installed:'
+kubelet --version
+kubeadm version
+kubectl version
