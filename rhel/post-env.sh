@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 echo '=== Disable Swap memory'
-echo '@ Swap : Before config'
+echo '@ swap : BEFORE config'
 sudo swapon --show
 cat /etc/fstab 
 ## Disable swap now and forever : required by kubelet
@@ -22,25 +22,28 @@ swap_mounted="$(cat /etc/fstab |grep ' swap' |grep -v '^ *#' |awk '{print $1}')"
 [[ $swap_mounted ]] && {
     device="$(echo $swap_mounted |awk '{print $1}')"
     sudo sed -i "s,$device,#$device," /etc/fstab
-} || { echo 'swap mount ALREADY commented out'; }
+} || { echo '=== swap mount ALREADY commented out'; }
 
-echo '@ Swap : After config'
+echo '@ swap : AFTER config'
 sudo swapon --show
 cat /etc/fstab 
 sudo systemctl daemon-reload
 
 # SELinux mod : now and forever
 echo '=== SELinux : Set to Permissive'
+echo '@ SELinux : BEFORE mod'
+getenforce
+echo '@ SELinux : Reset/Configure:'
 sudo setenforce 0 # set to Permissive (Unreliable)
 # "permissive" is "disabled", but logs what would have been if "enforcing".
 #sudo sed -i -e 's/^SELINUX=permissive/SELINUX=disabled/' /etc/selinux/config
 #sudo sed -i -e 's/^SELINUX=enforcing/SELINUX=disabled/' /etc/selinux/config
 sudo sed -i -e 's/^SELINUX=disabled/SELINUX=permissive/' /etc/selinux/config
 sudo sed -i -e 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
-echo '@ SELinux : After config'
+echo '@ SELinux : AFTER mod'
 sestatus |grep 'SELinux status'
 getenforce
 
-echo '=== REBOOT REQUIRED for SELinux changes to take effect.'
+echo '=== REBOOT REQUIRED for any SELinux changes to take effect.'
 
 

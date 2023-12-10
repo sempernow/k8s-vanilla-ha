@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# - Install containerd as the CRI runtime for Kubernetes. 
+# - Configure host network
+# - Install containerd as the container runtime for Kubernetes. 
 # - Install Docker CE server and client.
 # REF:
 #   https://kubernetes.io/docs/setup/production-environment/
@@ -58,11 +59,50 @@ container_tools(){
         sudo yum -y update
     }
     echo '=== Install : Docker CE + containerd.io'
+    ## NOTE this does NOT integrate Docker Engine (server) with Kubernetes, 
+    ## even if both are configured to the same container-runtime socket.
+    ## Integration requires a rapidly-evolving scheme, with prior/current schemes losing support.
+    ## See https://github.com/Mirantis/cri-dockerd . Also see its configuration under Minikube. 
     sudo yum -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
     docker -v >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ docker install'; exit 11; }
     dockerd -v >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ dockerd install'; exit 12; }
     containerd -v >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ containerd install'; exit 13; }
+
+
+    # Install cri-dockerd (shim) : Integrate Docker Engine (server) with Kubernetes
+    # https://github.com/Mirantis/cri-dockerd
+    # https://kubernetes.io/blog/2022/02/17/dockershim-faq/
+    # # Configure Kubernetes :
+    # sudo kubeadm init \
+    #     --pod-network-cidr=10.244.0.0/16 \
+    #     --cri-socket /run/cri-dockerd.sock
+    ver='0.3.8'
+    [[ $(cri-dockerd --version 2>&1 |grep $ver) ]] || {
+        echo '=== Download/Install : cri-dockerd (Docker/Kubernetes CRI shim)'
+        # Download binary
+        tarball="cri-dockerd-${ver}.${ARCH}.tgz"
+        url=https://github.com/Mirantis/cri-dockerd/releases/download/v${ver}/$tarball
+        wget -nv $url && tar -xaf $tarball && cd cri-dockerd || { echo '=== FAIL @ cri-dockerd download';exit 15; }
+        # Install cri-dockerd binary
+        sudo mkdir -p /usr/local/bin
+        sudo install -o root -g root -m 0755 cri-dockerd /usr/local/bin/cri-dockerd
+        # Download systemd units
+        url="https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd"
+        wget -nv $url/cri-docker.service || { echo '=== FAIL # cri-docker.service download';ecit 14; }
+        wget -nv $url/cri-docker.socket || { echo '=== FAIL # cri-docker.socket download';ecit 15; }
+        # Configure systemd units for cri-dockerd (service and socket)
+        sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' cri-docker.service
+        sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' cri-docker.service
+        sudo cp -p cri-docker.socket /usr/lib/systemd/system/
+        sudo cp -p cri-docker.service /usr/lib/systemd/system/
+        sudo chown root:root /usr/lib/systemd/system/cri-docker.*
+        sudo chmod 0644 /usr/lib/systemd/system/cri-docker.*
+        # Enable/Start : Docker should be running first.
+        # sudo systemctl daemon-reload
+        # sudo systemctl enable --now cri-docker.socket
+        # sudo systemctl enable --now cri-docker.service
+    }
 
 
     # Install/Update cri-tools, a kubernetes-sigs project : crictl + critest
@@ -88,12 +128,12 @@ container_tools(){
     [[ $(crictl -v 2>&1 |grep $ver) ]] && {
         echo '=== Configure : cri-tools'
         # CRI tools require sudo to run, yet they are not in sudo PATH, so create soft link
-        sudo ln -s /usr/local/bin/crictl  /usr/sbin/crictl
-        sudo ln -s /usr/local/bin/critest /usr/sbin/critest
+        [[ -f /usr/sbin/crictl ]] || sudo ln -s /usr/local/bin/crictl  /usr/sbin/crictl
+        [[ -f /usr/sbin/critest ]] || sudo ln -s /usr/local/bin/critest /usr/sbin/critest
 
         # Verify (@ sudoer access) 
         sudo crictl -v >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ crictl sudoer config'; exit 24; }
-        sudo critest -v >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ critest sudoer config'; exit 25; }
+        sudo critest --version >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ critest sudoer config'; exit 25; }
 
         # Configure crictl 
         sudo crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock \

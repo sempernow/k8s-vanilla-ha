@@ -82,7 +82,10 @@ _ssh -x "
 # Configure Docker server to start on boot
 _ssh -x "
     sudo systemctl --now enable docker.service
-    systemctl status docker.service
+    [[ $(type -t cri-dockerd) ]] && {
+        sudo systemctl enable --now cri-docker.socket
+        sudo systemctl enable --now cri-docker.service
+    }
 "
 
 # Install kubernetes tools
