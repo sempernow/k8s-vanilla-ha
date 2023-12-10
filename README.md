@@ -555,7 +555,9 @@ kubectl get deploy -A |xargs -IX -c /bin/bash -c 'kubectl delete ' _ X
 sudo kubeadm reset
 sudo systemctl disable --now containerd.service
 sudo rm -rf /var/lib/containerd/*
-rm -rf ~/.kube/*
+sudo rm -rf ~/.kube/*
+sudo rm -rf /var/lib/cni
+sudo rm -rf /etc/cni
 ```
 
 @ Admin machine (Windows/WSL)
