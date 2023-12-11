@@ -421,11 +421,14 @@ In our case, on the 1st control-plane node:
 
 ```bash
 # Pull images beforehand
-sudo kubeadm config images pull |& tee kubeadm.config.images.pull.log
+sudo kubeadm config images pull \
+    #--cri-socket unix:///run/cri-dockerd.sock \
+    |& tee kubeadm.config.images.pull.log
 
 # Preflight phase only
 sudo kubeadm init phase preflight -v5 \
     --ignore-preflight-errors=Mem \
+    #--cri-socket unix:///run/cri-dockerd.sock \
     |& tee kubeadm.init.phase.preflight.$(hostname).log
 
 # Initialize an HA cluster imperatively : Delete `--dry-run` line when ready.
@@ -440,6 +443,7 @@ sudo kubeadm init -v5 \
     --control-plane-endpoint "$vipp" \
     --pod-network-cidr "$pnet" \
     --service-cidr "$snet" \
+    #--cri-socket unix:///run/cri-dockerd.sock \
     |& tee kubeadm.init.$(hostname).log
 
 # Configure the client (kubectl)
