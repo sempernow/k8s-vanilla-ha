@@ -322,6 +322,7 @@ localAPIEndpoint:
 nodeRegistration:
   # All `kubelet` command options : See kubelet -h |less
   kubeletExtraArgs:
+  # https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/
     v: 5           # Verbosity
     image-repository: registry.k8s.io # Default
     upload-certs:  # Expires after 2h (along with join command)
@@ -472,6 +473,53 @@ kubectl get node
 - Status of node(s) remains `NotReady` until the "Pod Nework" 
   is configured by installing a CNI-compliant addon such as Calico. 
   Perform such installs at any Master node. See "Install Pod Network" section.
+
+#### [Prevent "host network mode" at `kubeadm init`](https://chat.openai.com/share/c5c2284b-1b21-4196-a0c6-b1187de78654)
+
+**By default, `kubeadm init` will use the "host network mode" if it detects that the host machine is using it.**
+
+In a "host network mode", containers within a pod share the network namespace of the host machine, meaning they have the same network interfaces and (redundant) IP addresses as the host. This simplifies networking for core components like the kubelet, kube-proxy, and others.
+
+If the `kubelet` is operating in "host network mode", then the **core pods** (like those in the `kube-system` namespace) to **share the same IP address**. This is typically achieved using a technique called "host networking".
+
+How to prevent the "host network mode" when initializing a cluster using "kubeadm init"?
+
+To prevent using "host network mode" when initializing a  cluster with `kubeadm init`, 
+ensure that the `kubelet` is configured to the Network Plugin, not the host network. 
+This is accomplished by setting the flag `--network-plugin` at a `kubadm` configuration:
+
+Create/Edit the kubelet config
+
+@ `/etc/systemd/system/kubelet.service.d/10-kubeadm.conf`
+
+```bash
+sudo mkdir -p /etc/systemd/system/kubelet.service.d/
+suco touch /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+```
+`KUBELET_KUBEADM_ARGS="--flag1=value1 --flag2=value2 ..."`
+
+```conf
+[Service]
+Environment="KUBELET_KUBEADM_ARGS=--network-plugin=calico"
+```
+- ??? Or, by [kublet-kubeadm integration](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/kubelet-integration/)
+- ??? Or [@ `/var/lib/kubelet/kubeadm-flags.env`](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/kubelet-integration/)
+
+then restart `kubelet`
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet
+```
+
+
+Declare Pod CIDR on init:
+
+```bash
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+```
+- Must align with that of the chosen CNI-compliant Network Plugin  
+
 
 ### Cluster-init Verify / Troubleshoot  (Pre CNI addon)
 
