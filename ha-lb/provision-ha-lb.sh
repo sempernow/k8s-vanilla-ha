@@ -24,7 +24,7 @@ ssh_configured_hosts='a0 a1'
 lb_1_fqdn='a0.local'
 lb_2_fqdn='a1.local'
 device='eth0' # Applicable network interface device common to all LB nodes
-## VIP must be static and not assignable by DHCP server.
+## VIP must be static and not assignable by the DHCP server.
 vip='192.168.0.100' 
 vip6='::ffff:c0a8:64'
 ## Get IP address of each LB node from ~/.ssh/config

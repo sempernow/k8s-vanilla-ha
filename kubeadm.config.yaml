@@ -1,0 +1,62 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+certificateKey: fb594fa0b1af4fef77045ba76afd3029146557c70677d6f0b447aeac37ffb8ea 
+bootstrapTokens:
+- groups:
+  - system:bootstrappers:kubeadm:default-node-token
+  token: ojt3kn.5kin2no0pyy554eh
+  ttl: 24h0m0s
+  usages:
+  - signing
+  - authentication
+nodeRegistration:
+  ignorePreflightErrors:
+  - Mem
+  criSocket: unix:///var/run/containerd/containerd.sock
+  kubeletExtraArgs: # See kubelet --help
+    v: "5" 
+    pod-cidr: 10.20.0.0/16 
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: 1.28.4
+imageRepository: registry.k8s.io
+apiServer:
+  timeoutForControlPlane: 4m0s
+certificatesDir: /etc/kubernetes/pki
+clusterName: kubernetes
+controllerManager: {}
+dns: {}
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+controlPlaneEndpoint: 192.168.0.100:8443
+networking:
+  serviceSubnet: 10.55.0.0/12 
+  podSubnet: 10.20.0.0/16 
+  dnsDomain: cluster.local
+scheduler: {}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: kube-apiserver:6443
+    token: ojt3kn.5kin2no0pyy554eh
+    caCertHashes: []
+    unsafeSkipCAVerification: false 
+  timeout: 5m0s
+  tlsBootstrapToken: ojt3kn.5kin2no0pyy554eh 
+controlPlane:
+  localAPIEndpoint:
+    advertiseAddress: 192.168.0.100
+    bindPort: 8443
+nodeRegistration: 
+  ignorePreflightErrors:
+  - Mem
+  imagePullPolicy: IfNotPresent
+  criSocket: unix:///var/run/containerd/containerd.sock 
+  kubeletExtraArgs: 
+    v: 5            
+    pod-cidr: 10.20.0.0/16
+    cgroup-driver: systemd

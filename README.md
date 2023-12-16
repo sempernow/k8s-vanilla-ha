@@ -245,9 +245,10 @@ stat -fc %T /sys/fs/cgroup/
 ```
 - For cgroup v2, the output is `cgroup2fs`.
 - For cgroup v1, the output is `tmpfs`.
+    - Is v1 @ Hyper-V / AlamLinux 8
 
 ~~If cgroup v1, then set `kubelet` flag `--cgroup-driver` to `systemd`, else set to `cgroupfs`.~~
-Should match the container runtime setting, and if the parent processes are `systemd`, then should use that. 
+Driver should match the container runtime setting, and if the parent processes are `systemd`, then should use that. 
 
 ### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/) | [Configuration](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-InitConfiguration)
 
@@ -461,6 +462,13 @@ kubectl get node
 # NAME       STATUS     ROLES           AGE   VERSION
 # a0.local   NotReady   control-plane   16h   v1.28.3
 ```
+- All K8s-core pods are Static Pods. Each is assigned the IP address of their node, 
+  unlike all other Pods that are created during or after the Pod Network (CIDR) 
+  is installed by whatever CNI-compliant network plugin is applied. (Ours is Calico).
+  Each Static Pod is managed directly by the `kubelet` running on its node; 
+  they are not of the control plane; not stored in etcd.  
+    - Location of Static Pod manifests (YAML):  
+      `/etc/kubernetes/manifests/`
 - Certs upload is good for 2hrs. After that, the certs are deleted, 
   and must be regenerated at an existing control node.
     ```bash
@@ -474,7 +482,9 @@ kubectl get node
   is configured by installing a CNI-compliant addon such as Calico. 
   Perform such installs at any Master node. See "Install Pod Network" section.
 
-#### [Prevent "host network mode" at `kubeadm init`](https://chat.openai.com/share/c5c2284b-1b21-4196-a0c6-b1187de78654)
+#### ~~[Prevent "host network mode" at `kubeadm init`](https://chat.openai.com/share/c5c2284b-1b21-4196-a0c6-b1187de78654)~~
+
+UPDATE: Wrong: Neither `kubeadm` nor `kubelet` accept argument `--network-plugin`.
 
 **By default, `kubeadm init` will use the "host network mode" if it detects that the host machine is using it.**
 
@@ -640,11 +650,13 @@ ansibash 'sudo reboot'
 
 ## Kubernetes Networking
 
-- Node Network
-    - Not under K8s control.
+- Node (Host) Network CIDR `192.168.0.0/24`
+    - External to cluster.
     - `https://192.168.0.100:8443` (HALB VIP)
-        - Cluster Address is VIP on (External) Node Network.
-            - The HAProxy/Keepalived HALB implements VRRP to affect a virtual gateway router having all the control nodes as its clients.
+        - Load Balancer's IP:PORT is the Control Plane Endpoint; 
+          a VIP on the Node (Host) Network.
+            - The HAProxy/Keepalived HALB implements VRRP 
+              to affect a Virtual Gateway Router whose clients are all the control nodes.
                 - The VIP should lie outside the subnet's DHCP-server range,
                   else a reserved (static) address therein.
         - `sudo cat /etc/kubernetes/admin.conf |yq .clusters.[].cluster.server`
@@ -662,37 +674,56 @@ ansibash 'sudo reboot'
             ```
     - `192.168.0.93` (`a0.local`)
     - `192.168.0.94` (`a1.local`)
-- "Service Subnet" AKA "Service CIDR" AKA "Service Cluster-IP Range" AKA "Service-Cluster CIDR" 
-    - `10.96.0.0/12` (`kubeadm init` default)
-        - `--service-cidr CIDR` 
+- "Service Subnet" AKA "Service CIDR" AKA "Service ClusterIP Range" AKA "Service-Cluster CIDR". 
+    Used for internal communication between services within the cluster. 
+    It defines the IP address range assigned to Kubernetes services.
+    - `10.96.0.0/12` (`kubeadm init` default); *1,048,576 Services*
+        - `--service-cidr=$cidr` 
             - @ `kubeadm init`
-        - `--service-cluster-ip-range=10.96.0.0/12`
-            - @ `kubelet`, `kube-apiserver`, `etcd`
+        - `--service-cluster-ip-range=$cidr`
+            - @ `kubelet`, `kube-apiserver`, `etcd`;
+              which is initialized on `kubeadm init`
     - Virtual IPs (VIPs) per Service, 
       providing a stable IP address  for all
-- "Pod Subnet" AKA "Pod-Network CIDR" AKA "Pod CIDR" AKA "Cluster CIDR"  AKA "Cluster-Network CIDR"
-    - `10.244.0.0/16` (`kubeadm init` default)
-    - `172.16.0.0/12` (`kubeadm init` default alt)
+- "Pod Subnet" AKA "Pod-Network CIDR" AKA "Pod CIDR" AKA "Cluster CIDR"  AKA "Cluster-Network CIDR".
+    Defines the IP address range for individual pods within the cluster.
+    Pods communicate directly with each other using these IP addresses.
+    - `10.244.0.0/16` (`kubeadm init` default); *65,536 Pods*
+    - `172.16.0.0/12` (`kubeadm init` default alt); *1,048,576 Pods*
+        - Default CIDR is per environment;
+          upon Kubernetes' evaluation of the host network.
     - `10.10.0.0/16` (commonly chosen alt) 
-        - `--pod-network-cidr CIDR`
-            - Declare @ `kubeadm init`
+        - `--pod-network-cidr=$cidr`
+            - @ `kubeadm init`
     - `192.168.0.0/16` (Calico default)
-        - Overlaps with a common default Node CIDR.
-        - Adopts that of `kubeadm init` if set (`--pod-network-cidr`).
-        - At other (non-K8s) deployments, override @ `calico.yaml`
+        - WARNING: This overlaps with a common default Node (Host) CIDR.
+        - Calico adopts that of `kubeadm init` if set (`--pod-network-cidr`).
+        - At other (non-K8s) deployments
+            - @ `calico.yaml`
             ```yaml
             - name: CALICO_IPV4POOL_CIDR
               value: "10.10.0.0/16"
             ```
 
-Select from the Private Address Space ([RFC-1918](https://www.ietf.org/rfc/rfc1918.txt)) 
-for all cluster-internal CIDRs; for both Service and Pod CIDRs.
+# IP Address Ranges
 
-         10.0.0.0    - 10.255.255.255  (10/8 prefix)
-         172.16.0.0  - 172.31.255.255  (172.16/12 prefix)
-         192.168.0.0 - 192.168.255.255 (192.168/16 prefix)
+Cluster-internal CIDRs for Service and Pod networks (subnets) must not overlap. 
+Select from within the **Private Address Space** ([RFC-1918](https://www.ietf.org/rfc/rfc1918.txt)):
 
->Failing to explicitly declare Service and Pod CIDRs upon "`kubeadm init`" may result in those CIDRs overlapping with that of the (pre-existing) node network. For example, after one such install, prior to installing Calico, the core pods were assigned IP addresses in the CIDR of the node (in the subnet's DHCP-server range). After Calico install, new pods were assigned IPs in a different (better) CIDR (`172.16.0.0/12`).
+    RANGE                                               COMMON CIDR
+
+    10.0.0.0    - 10.255.255.255  (10/8 prefix)         10.0.0.0/16
+    172.16.0.0  - 172.31.255.255  (172.16/12 prefix)    172.16.0.0/12
+    192.168.0.0 - 192.168.255.255 (192.168/16 prefix)   192.168.0.0/24
+
+Note that Static Pods are always asigned the public IP address of their node (host).
+Ulike all other Pods, they are handled directly by their node's `kubelet`, 
+not by the Kubernetes API (`kube-apiserver`).
+
+### Routing 
+
+Routing rules distinguish between traffic destined for services (handled by `kube-proxy`) 
+and traffic between pods (handled by the CNI plugin).
 
 ### TLS Cipher Suites 
 
@@ -761,8 +792,9 @@ kubeadm init ... --pod-network-cidr "10.10.0.0/16" ...
 
 ```bash
 ver='3.26.4'
-wget -q https://raw.githubusercontent.com/projectcalico/calico/v${ver}/manifests/calico.yaml
-kubectl apply -f calico.yaml
+manifest='calico.yaml'
+wget -nv https://raw.githubusercontent.com/projectcalico/calico/v${ver}/manifests/$manifest
+kubectl apply -f $manifest
 
 ```
 
