@@ -705,7 +705,7 @@ ansibash 'sudo reboot'
               value: "10.10.0.0/16"
             ```
 
-# IP Address Ranges
+## IP Address Ranges
 
 Cluster-internal CIDRs for Service and Pod networks (subnets) must not overlap. 
 Select from within the **Private Address Space** ([RFC-1918](https://www.ietf.org/rfc/rfc1918.txt)):
@@ -775,20 +775,26 @@ REFs:
 
 ## K8s process params : `ps aux` (See `psk`)
 
+## Helm : Install | [Releases](https://github.com/helm/helm/releases)
+
+See [install-helm.sh](rhel/install-helm.sh)
+
 ## Install Pod Network 
 
-Calico is a CNI-compliant NetworkPolicy addon that creates 
+CNI-compliant NetworkPolicy addon that creates 
 and manages the Pod Network AKA Cluster Network.
 It accepts the existing Pod Network CIDR if already set, 
 else defaults to `192.168.0.0/16`, 
 which often conflicts with the subnet CIDR of node(s). 
-So, explicitly declare the Pod Network CIDR on cluster initialization:
 
-```bash
-kubeadm init ... --pod-network-cidr "10.10.0.0/16" ...
-```
+Popular CNI-compliant Network Addons:
 
-### [Install Calico by Manifest method](https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises#install-calico-with-kubernetes-api-datastore-50-nodes-or-less)
+- Cillium is eBPF based, which allows for advanced observability, load balancing, api-aware networking, service-mesh integration, and security.
+    - eBPF requires newer distros; is not supported in CentOS/RHEL 7.
+- Canal is popular and simple; build of Calico (Policy) and Flannel (overlay).
+- Calico is the most popular Network Policy addon
+
+### [Calico : Install by Manifest method](https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises#install-calico-with-kubernetes-api-datastore-50-nodes-or-less)
 
 ```bash
 ver='3.26.4'
@@ -797,6 +803,71 @@ wget -nv https://raw.githubusercontent.com/projectcalico/calico/v${ver}/manifest
 kubectl apply -f $manifest
 
 ```
+## Install Kubernetes Ingress Controller
+
+Without a 3rd-party Ingress Controller (Pod(s)), K8s Ingress (object) is useless.
+
+### [Istio Ingress Controller](https://istio.io/latest/docs/setup/install/)
+
+This (`istiod`) is a heavyweight addon requiring at least 4GB per node,
+and dozens of Linux-kernel modules (some of which don't exist on AlmaLinux 8). 
+
+- [Kernel Module requirements](https://istio.io/latest/docs/setup/platform-setup/prerequisites/#kernel-module-requirements-on-cluster-nodes)
+- [Pod requirements](https://istio.io/latest/docs/ops/deployment/requirements/#pod-requirements)
+- [Ports](https://istio.io/latest/docs/ops/deployment/requirements/#ports-used-by-istio)
+
+Install using either Helm or Istioctl (Istio Operator is depricated)
+
+Install Istio:
+
+```bash
+helm repo add istio https://istio-release.storage.googleapis.com/charts
+helm repo update
+
+```
+
+### [Ingress-NGINX Controller](https://kubernetes.github.io/ingress-nginx/deploy/) | [GitHub](https://github.com/kubernetes/ingress-nginx)
+
+Does NOT include device necessary for ingress.
+
+
+[Bare-matal considerations (implementations)](https://kubernetes.github.io/ingress-nginx/deploy/baremetal/)
+
+
+
+### [Gateway API](https://github.com/kubernetes-sigs/gateway-api#kubernetes-gateway-api) (K8s-sig)
+
+This is a promising architecture and API from the Kubernetes-sigs group, 
+but it's not quite ready for production.
+
+Core Gateway API:
+
+- Gateway
+- GatewayClass
+- HTTPRoute
+- TCPRoute
+- TLSRoute
+- UDPRoute
+
+Install the Gateway-API CRDs:
+
+```bash
+ver='1.0.0'
+gateway=gateway-standard-install.yaml
+wget -nvO $gateway https://github.com/kubernetes-sigs/gateway-api/releases/download/v${ver}/standard-install.yaml
+kubectl apply -f $gateway
+
+```
+
+Then install a 3rd-party implementation &hellip;
+
+### [Implementations](https://gateway-api.sigs.k8s.io/implementations/#gateways) 
+
+Note those having GA status are the more mature.
+
+- Gateway Controllers 
+    - [NGINX Gateway Fabric](https://gateway-api.sigs.k8s.io/implementations/#nginx-gateway-fabric)
+
 
 ## REFerence : K8s core Processes, Pods and containers
 

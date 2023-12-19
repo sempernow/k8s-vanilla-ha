@@ -14,14 +14,15 @@ ARCH=amd64
 # https://kubernetes.io/docs/setup/production-environment/container-runtimes/#containerd
 
 echo '@ CRI Runtime : Configure network prerequisites'
+## Load kernel modules on boot
 ## br_netfilter enables transparent masquerading and facilitates Virtual Extensible LAN (VxLAN) traffic for communication between Kubernetes pods across the cluster.
 cat << EOF |sudo tee /etc/modules-load.d/k8s-containerd.conf
 overlay
 br_netfilter
 EOF
-
-sudo modprobe overlay
-sudo modprobe br_netfilter
+## Load kernel modules now
+sudo modprobe overlay       || { echo '=== FAIL @ loading overlay module';exit 10; }
+sudo modprobe br_netfilter  || { echo '=== FAIL @ loading br_netfilter module';exit 10; }
 
 ## Set iptables bridging 
 cat << EOF |sudo tee /etc/sysctl.d/k8s-containerd.conf
@@ -29,20 +30,9 @@ net.bridge.bridge-nf-call-iptables  = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
 EOF
-
 ## Apply sysctl params without reboot
 sudo sysctl --system
-
-echo '@ CRI Runtime : Verify network prerequisites'
-
-## Verify network prerequisites
-[[ $(lsmod |grep br_netfilter) ]] \
-    && echo '=== OKAY : br_netfilter module' \
-    || echo '=== FAIL : br_netfilter module'
-[[ $(lsmod |grep overlay) ]] \
-    && echo '=== OKAY : overlay module' \
-    || echo '=== FAIL : overlay module'
-# Show settings (k = v)
+## Show settings (k = v)
 sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
 
 # Docker CE + containerd + ...
@@ -110,10 +100,9 @@ container_tools(){
     # https://github.com/kubernetes-sigs/cri-tools/releases/
     ver='v1.28.0'
     [[ $(crictl -v 2>&1 |grep $ver) ]] || {
+        echo '=== Download/Install : cri-tools'
         base_url="https://github.com/kubernetes-sigs/cri-tools/releases/download/$ver"
         target_parent=/usr/local/bin
-
-        echo '=== Download/Install : cri-tools'
 
         echo '=== Install : crictl'
         tarball="crictl-${ver}-linux-${ARCH}.tar.gz"
@@ -127,11 +116,12 @@ container_tools(){
     }
     [[ $(crictl -v 2>&1 |grep $ver) ]] && {
         echo '=== Configure : cri-tools'
-        # CRI tools require sudo to run, yet they are not in sudo PATH, so create soft link
+
+        # CRI tools require sudo to run, yet are not in sudo PATH, so create soft link
         [[ -f /usr/sbin/crictl ]] || sudo ln -s /usr/local/bin/crictl  /usr/sbin/crictl
         [[ -f /usr/sbin/critest ]] || sudo ln -s /usr/local/bin/critest /usr/sbin/critest
 
-        # Verify (@ sudoer access) 
+        # Verify sudoer access 
         sudo crictl -v >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ crictl sudoer config'; exit 24; }
         sudo critest --version >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ critest sudoer config'; exit 25; }
 

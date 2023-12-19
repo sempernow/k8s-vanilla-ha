@@ -9,7 +9,8 @@ exit # WIP
 
 # Manifest Method 
 # https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises
-wget -nv https://raw.githubusercontent.com/projectcalico/calico/v3.26.4/manifests/calico.yaml
+ver='3.26.4'
+wget -nv https://raw.githubusercontent.com/projectcalico/calico/v${ver}/manifests/calico.yaml
 kubectl apply -f calico.yaml
 
 exit
