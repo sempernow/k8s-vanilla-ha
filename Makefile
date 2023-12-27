@@ -58,9 +58,10 @@ export K8S_CA_CERT_HASH       ?= sha256:bd55cff35321450ff0fdece0f1b7e3987a96a437
 
 menu :
 	$(INFO) 'Meta'
-	@echo "html      : .MD -> .HTML"
-	@echo "push      : gc && git push"
-	@echo "config    : Generate ${K8S_KUBEADM_CONFIG} from .tpl"
+	@echo "html    : .MD -> .HTML"
+	@echo "push    : gc && git push"
+	@echo "k8conf  : Generate ${K8S_KUBEADM_CONFIG} from .tpl"
+	@echo "lbconf  : Generate HA-LB (HAProxy and Keepalived) conf from .tpl"
 
 # $(INFO) 'Environment'
 # @echo "PWD=${PRJ_ROOT}"
@@ -84,7 +85,7 @@ perms :
 ##############################################################################
 ## Recipes : Cluster
 
-config :
+k8conf :
 	cat ${K8S_KUBEADM_CONFIG}.tpl \
 		|sed 's#K8S_VERSION#${K8S_VERSION}#g' \
 		|sed 's#K8S_REGISTRY#${K8S_REGISTRY}#g' \
@@ -101,3 +102,5 @@ config :
 		|sed '/^ *#/d' |sed '/^\s*$$/d' \
 		|tee ${K8S_KUBEADM_CONFIG}
 
+lbconf :
+	bash make.recipes.sh halb
