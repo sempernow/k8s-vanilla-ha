@@ -36,8 +36,9 @@ export HALB_ENDPOINT ?= ${HALB_VIP}:${HALB_PORT}
 
 ## Configurations : https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/
 export K8S_VERSION            ?= 1.28.4
+export K8S_REGISTRY           ?= registry.k8s.io
 export K8S_VERBOSITY          ?= 5
-export K8S_KUBEADM_CONFIG     ?= kubeadm.config.yaml
+export K8S_KUBEADM_CONFIG     ?= kubeadm-config.yaml
 export K8S_IMAGE_REPOSITORY   ?= registry.k8s.io
 export K8S_CONTROL_PLANE_IP   ?= ${HALB_VIP}
 export K8S_CONTROL_PLANE_PORT ?= ${HALB_PORT}
@@ -49,6 +50,8 @@ export K8S_CGROUP_DRIVER      ?= systemd
 export K8S_BOOTSTRAP_TOKEN    ?= ojt3kn.5kin2no0pyy554eh
 ## K8S_CERTIFICATE_KEY=$(kubeadm certs certificate-key)
 export K8S_CERTIFICATE_KEY    ?= fb594fa0b1af4fef77045ba76afd3029146557c70677d6f0b447aeac37ffb8ea
+## # K8S_CA_CERT_HASH=$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt |openssl rsa -pubin -outform der 2>/dev/null |openssl dgst -sha256 -hex |sed 's/^.* //')
+export K8S_CA_CERT_HASH       ?= sha256:bd55cff35321450ff0fdece0f1b7e3987a96a437dcad866fdf8ff40c1a0e549c 
 
 ##############################################################################
 ## Recipes : Meta
@@ -84,6 +87,7 @@ perms :
 config :
 	cat ${K8S_KUBEADM_CONFIG}.tpl \
 		|sed 's#K8S_VERSION#${K8S_VERSION}#g' \
+		|sed 's#K8S_REGISTRY#${K8S_REGISTRY}#g' \
 		|sed 's#K8S_VERBOSITY#${K8S_VERBOSITY}#g' \
 		|sed 's#K8S_IMAGE_REPOSITORY#${K8S_IMAGE_REPOSITORY}#g' \
 		|sed 's#K8S_CONTROL_PLANE_IP#${K8S_CONTROL_PLANE_IP}#g' \

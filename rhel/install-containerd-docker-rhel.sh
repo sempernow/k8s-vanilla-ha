@@ -33,7 +33,7 @@ EOF
 ## Apply sysctl params without reboot
 sudo sysctl --system
 ## Show settings (k = v)
-sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+#sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
 
 # Docker CE + containerd + ...
 container_tools(){
@@ -42,12 +42,16 @@ container_tools(){
         echo '=== Install : yum-utils'
         sudo yum -y install yum-utils
     }
-    [[ $(dnf repolist |grep docker-ce) ]] || {
-        echo '=== Add repo: docker-ce'
+    [[ $(yum repolist all |grep docker-ce) ]] || {
+        echo '=== Docker CE : Add repo'
         url='https://download.docker.com/linux/centos/docker-ce.repo'
-        sudo dnf -y config-manager --add-repo $url
+        #sudo dnf -y config-manager --add-repo $url
+        sudo yum-config-manager --add-repo $url
+        sudo yum-config-manager --enable docker-ce
+        sudo yum -y makecache
         sudo yum -y update
     }
+
     echo '=== Install : Docker CE + containerd.io'
     ## NOTE this does NOT integrate Docker Engine (server) with Kubernetes, 
     ## even if both are configured to the same container-runtime socket.
@@ -67,31 +71,34 @@ container_tools(){
     # sudo kubeadm init \
     #     --pod-network-cidr=10.244.0.0/16 \
     #     --cri-socket /run/cri-dockerd.sock
-    ver='0.3.8'
-    [[ $(cri-dockerd --version 2>&1 |grep $ver) ]] || {
-        echo '=== Download/Install : cri-dockerd (Docker/Kubernetes CRI shim)'
-        # Download binary
-        tarball="cri-dockerd-${ver}.${ARCH}.tgz"
-        url=https://github.com/Mirantis/cri-dockerd/releases/download/v${ver}/$tarball
-        wget -nv $url && tar -xaf $tarball && cd cri-dockerd || { echo '=== FAIL @ cri-dockerd download';exit 15; }
-        # Install cri-dockerd binary
-        sudo mkdir -p /usr/local/bin
-        sudo install -o root -g root -m 0755 cri-dockerd /usr/local/bin/cri-dockerd
-        # Download systemd units
-        url="https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd"
-        wget -nv $url/cri-docker.service || { echo '=== FAIL # cri-docker.service download';ecit 14; }
-        wget -nv $url/cri-docker.socket || { echo '=== FAIL # cri-docker.socket download';ecit 15; }
-        # Configure systemd units for cri-dockerd (service and socket)
-        sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' cri-docker.service
-        sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' cri-docker.service
-        sudo cp -p cri-docker.socket /usr/lib/systemd/system/
-        sudo cp -p cri-docker.service /usr/lib/systemd/system/
-        sudo chown root:root /usr/lib/systemd/system/cri-docker.*
-        sudo chmod 0644 /usr/lib/systemd/system/cri-docker.*
-        # Enable/Start : Docker should be running first.
-        # sudo systemctl daemon-reload
-        # sudo systemctl enable --now cri-docker.socket
-        # sudo systemctl enable --now cri-docker.service
+    INSTALL_DOCKER_SHIM=false
+    [[ $INSTALL_DOCKER_SHIM ]] && {
+        ver='0.3.8'
+        [[ $(cri-dockerd --version 2>&1 |grep $ver) ]] || {
+            echo '=== Download/Install : cri-dockerd (Docker/Kubernetes CRI shim)'
+            # Download binary
+            tarball="cri-dockerd-${ver}.${ARCH}.tgz"
+            url=https://github.com/Mirantis/cri-dockerd/releases/download/v${ver}/$tarball
+            wget -nv $url && tar -xaf $tarball && cd cri-dockerd || { echo '=== FAIL @ cri-dockerd download';exit 15; }
+            # Install cri-dockerd binary
+            sudo mkdir -p /usr/local/bin
+            sudo install -o root -g root -m 0755 cri-dockerd /usr/local/bin/cri-dockerd
+            # Download systemd units
+            url="https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd"
+            wget -nv $url/cri-docker.service || { echo '=== FAIL # cri-docker.service download';ecit 14; }
+            wget -nv $url/cri-docker.socket || { echo '=== FAIL # cri-docker.socket download';ecit 15; }
+            # Configure systemd units for cri-dockerd (service and socket)
+            sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' cri-docker.service
+            sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' cri-docker.service
+            sudo cp -p cri-docker.socket /usr/lib/systemd/system/
+            sudo cp -p cri-docker.service /usr/lib/systemd/system/
+            sudo chown root:root /usr/lib/systemd/system/cri-docker.*
+            sudo chmod 0644 /usr/lib/systemd/system/cri-docker.*
+            # Enable/Start : Docker should be running first.
+            # sudo systemctl daemon-reload
+            # sudo systemctl enable --now cri-docker.socket
+            # sudo systemctl enable --now cri-docker.service
+        }
     }
 
 

@@ -3,8 +3,8 @@
 
 #>>>  WIP  <<<
 
-K8S_WORKER_NODES='a2 a3'
-K8S_MASTER_NODES='a1'
+K8S_WORKER_NODES='a3'
+K8S_MASTER_NODES='a0 a1'
 
 master=$(echo $K8S_MASTER_NODES |cut -d' ' -f1)
 
@@ -45,10 +45,13 @@ ssh $master /bin/bash -s < crictl-stop.sh
 
 # Reset K8s client and server at every node
 echo '=== Reset K8s client and server at every node'
-printf "%s\n" $K8S_WORKER_NODES $K8S_MASTER_NODES \
-    |xargs -IX ssh X '
-        rm -rf $HOME/.kube/*
-        sudo rm /etc/cni/net.d/*
-        sudo kubeadm reset --force
-    '
-
+printf "%s\n" $K8S_WORKER_NODES $K8S_MASTER_NODES |xargs -IX ssh X '
+    rm -rf $HOME/.kube/*
+    sudo kubeadm reset --force
+    sudo systemctl disable --now containerd.service
+    sudo rm -rf /var/lib/containerd/*
+    sudo rm -rf ~/.kube/*
+    sudo rm -rf /etc/cni/net.d/*
+    sudo systemctl enable --now containerd.service
+'
+# sudo rm -rf /var/lib/containerd/*

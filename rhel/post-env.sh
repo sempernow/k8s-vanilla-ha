@@ -28,6 +28,7 @@ echo '@ swap : AFTER config'
 sudo swapon --show
 cat /etc/fstab 
 sudo systemctl daemon-reload
+sudo firewall-cmd --reload
 
 # SELinux mod : now and forever
 echo '=== SELinux : Set to Permissive'

@@ -17,6 +17,9 @@
 #
 # ARGs: <list of ssh-configured machines>
 ###############################################################################
+# This script requires its PWD to be its own directory.
+cd "${BASH_SOURCE%/*}"
+
 [[ $1 ]] && {
     ssh_configured_machines="$@"
 } || {
@@ -37,20 +40,12 @@ _ssh(){
 }
 
 echo '@ Prep hosts'
-_ssh -s 'prep-env.sh'
-_ssh -s 'ports-k8s.sh'
-_ssh -s 'ports-istio.sh'
-_ssh -s 'ports-calico.sh'
+_ssh -s install-rpms.sh
+_ssh -s prep-env.sh
+_ssh -s ports-k8s.sh
+_ssh -s ports-istio.sh
+_ssh -s ports-calico.sh
 _ssh -x 'sudo firewall-cmd --reload'
-
-echo '@ Install and enable EPEL'
-_ssh -x '
-    sudo dnf -y install epel-release && sudo dnf -y update
-'
-    #sudo /usr/bin/crb enable
-
-echo '@ Install tc (for kubeadm) and other basic tools.'
-_ssh -x 'sudo dnf -y install iproute-tc bash-completion bind-utils tar nc lsof wget curl git jq vim tree'
 
 # Install yq (jq for yaml)
 ## https://github.com/mikefarah/yq/releases
@@ -66,14 +61,15 @@ _ssh -x "
 "
 
 # Install containerd through Docker CE install.
-_ssh -s 'install-containerd-docker-rhel.sh'
+_ssh -s install-containerd-docker-rhel.sh
 
 # Mods after install of RPM pkgs
-_ssh -s 'post-env.sh'
+_ssh -s post-env.sh
 
-# Configure containerd to use systemd driver instead of its default (cgroupfs driver).
+# Configure containerd : See /etc/containerd/config.toml
+## Sets cgroup driver to systemd instead of its default (cgroupfs).
 _ssh -x "
-    echo '$(<config-cka.toml)' |sudo tee /etc/containerd/config.toml
+    echo '$(<containerd-config.toml)' |sudo tee /etc/containerd/config.toml
     sudo systemctl daemon-reload
     sudo systemctl --now enable containerd.service
     systemctl status containerd.service
@@ -89,7 +85,7 @@ _ssh -x "
 "
 
 # Install kubernetes tools
-_ssh -s 'install-k8s-tools-rhel.sh'
+_ssh -s install-k8s-tools-rhel.sh
 
 # Report/Info
 echo "=== DONE : PROVISIONED nodes : $ssh_configured_machines"

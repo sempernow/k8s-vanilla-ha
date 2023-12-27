@@ -3,8 +3,8 @@ apiVersion: kubeadm.k8s.io/v1beta3
 kind: InitConfiguration
 ## @ https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-InitConfiguration
 ## Certificate Key:
-## key=$(sudo kubeadm certs certificate-key)
 ## See "kubeadm init" output : ... --certificate-key <KEY>
+## K8S_CERTIFICATE_KEY=$(sudo kubeadm certs certificate-key)
 certificateKey: K8S_CERTIFICATE_KEY 
 bootstrapTokens:
 - groups:
@@ -31,13 +31,13 @@ nodeRegistration:
   kubeletExtraArgs: # See kubelet --help
     v: "5" 
     pod-cidr: K8S_POD_CIDR 
-    #cgroup-driver: "systemd" # Advised for containerd
+    cgroup-driver: K8S_CGROUP_DRIVER 
 ---
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
 ## @ https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-ClusterConfiguration
 kubernetesVersion: K8S_VERSION
-imageRepository: registry.k8s.io
+imageRepository: K8S_REGISTRY
 apiServer:
   timeoutForControlPlane: 4m0s
 certificatesDir: /etc/kubernetes/pki
@@ -57,7 +57,11 @@ scheduler: {}
 # ---
 # apiVersion: kubelet.config.k8s.io/v1beta1
 # kind: KubeletConfiguration
+# ## PER NODE
 # ## @ https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration
+# ## ConfigMaps, kubelet-config-1, exist PER NODE.
+# ## kubectl get configmap kubelet-config-1 -n kube-system -o json |jq -Mr .data.kubelet |base64 -d 
+# ## Restart kubelet.service on any change to its --config CONFIG
 # enableServer: true 
 # #cgroupDriver: systemd # systemd || cgroupfs
 # imageGCHighThresholdPercent: 85
@@ -75,13 +79,21 @@ kind: JoinConfiguration
 ## @ https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-JoinConfiguration
 discovery:
   bootstrapToken:
-    apiServerEndpoint: kube-apiserver:6443
+    ## Generate token and CA certificate : kubeadm token create
+    ## CA certificate @ /etc/kubernetes/pki/ca.crt
     token: K8S_BOOTSTRAP_TOKEN
+    apiServerEndpoint: kube-apiserver:6443
     ## CA-Certificate Hash(es):
     ## See "kubeadm init" output: 
     ## --discovery-token-ca-cert-hash sha256:<hex-encoded-value>
     ## Is hash of "Subject Public Key Info" (SPKI) object
-    caCertHashes: []
+    ## Is DISABLED (Unsafe) if empty.
+    ## Create a caCertHash
+    ## (The SHA-256 hash of the public key extracted from ca.crt)
+    ## K8S_CA_CERT_HASH=$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt |openssl rsa -pubin -outform der 2>/dev/null |openssl dgst -sha256 -hex |sed 's/^.* //')
+    #caCertHashes: []
+    caCertHashes: 
+    - K8S_CA_CERT_HASH
     # Default: true
     unsafeSkipCAVerification: false 
   timeout: 5m0s

@@ -1,9 +1,13 @@
-! /etc/keepalived/keepalived.conf
-! Configuration File for keepalived
+## /etc/keepalived/keepalived.conf
+## Configuration File for keepalived
+## See man keepalived.conf
+
 global_defs {
     enable_script_security
     router_id LVS_DEVEL
+    max_auto_priority 100
 }
+
 vrrp_script check_apiserver {
   script "/etc/keepalived/check_apiserver.sh"
   interval 3

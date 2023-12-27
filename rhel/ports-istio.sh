@@ -10,7 +10,9 @@ sudo firewall-cmd --permanent --zone=public --add-service=http
 sudo firewall-cmd --permanent --zone=public --add-service=https
 
 ### Istio sidecar proxy (Envoy)
-sudo firewall-cmd --permanent --new-service=istio-envoy
+[[ $(sudo firewall-cmd --list-services |grep istio-envoy) ]] || {
+    sudo firewall-cmd --permanent --new-service=istio-envoy
+}
 sudo firewall-cmd --permanent --service=istio-envoy --set-description="Istio sidecar proxy (Envoy)"
 sudo firewall-cmd --permanent --service=istio-envoy --add-port=15001/tcp    # Istio Envoy outbound
 sudo firewall-cmd --permanent --service=istio-envoy --add-port=15006/tcp    # Istio Envoy inbound
@@ -22,7 +24,9 @@ sudo firewall-cmd --permanent --service=istio-envoy --add-port=15090/tcp    # Is
 sudo firewall-cmd --permanent --add-service=istio-envoy
 
 ### Istio control plane (istiod)
-sudo firewall-cmd --permanent --new-service=istiod
+[[ $(sudo firewall-cmd --list-services |grep istiod) ]] || {
+    sudo firewall-cmd --permanent --new-service=istiod
+}
 sudo firewall-cmd --permanent --service=istiod --set-description="Istio control plane (istiod)"
 sudo firewall-cmd --permanent --service=istiod --add-port=15010/tcp     # XDS and CA (cleartext)
 sudo firewall-cmd --permanent --service=istiod --add-port=15012/tcp     # XDS and CA (TLS and mTLS)

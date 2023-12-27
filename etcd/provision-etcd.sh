@@ -1,4 +1,9 @@
 #!/bin/bash
+# Install etcd
+
+# This script requires its PWD to be its own directory.
+cd "${BASH_SOURCE%/*}"
+
 set -a  # EXPORT ALL ...
 
 # Environment

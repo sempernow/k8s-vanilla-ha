@@ -8,17 +8,20 @@
 # >>>  Modify these settings per environment  <<<
 #################################################
 
+# This script requires its PWD to be its own directory.
+cd "${BASH_SOURCE%/*}"
+
 vm_ip(){
     # Print the IPv4 address of an ssh-configured Host ($1). See ~/.ssh/config.
     [[ $1 ]] || exit 99
     echo $(cat ~/.ssh/config |grep -A4 -B2 $1 |grep Hostname |head -n 1 |cut -d' ' -f2)
 }
 
-set -a  # EXPORT ALL
+set -a  # Export all
 
 # Environment
 echo '=== Environment'
-lb_config_files="keepalived.conf check_apiserver.sh haproxy.cfg"
+lb_config_files="keepalived.conf.tpl keepalived-check_apiserver.sh.tpl haproxy.cfg.tpl haproxy-99-haproxy.conf"
 ## Reset these LB-node values per Hypervisor/VM environment 
 ssh_configured_hosts='a0 a1'
 lb_1_fqdn='a0.local'
@@ -36,6 +39,7 @@ lb_2_ipv4=$(vm_ip ${lb_2_fqdn%%.*})
 [[ $(echo ${lb_2_ipv4} |cut -d'.' -f4) ]] \
     || { echo '=== FAIL @ lb_2_ipv4';exit 22; }
 
+# Agent
 _ssh() { 
     mode=$1;shift
     for vm in $ssh_configured_hosts
@@ -49,8 +53,7 @@ _ssh() {
     done 
 }
 
-set +a  # END EXPORT ALL 
-
+set +a  # END Export all 
 
 echo "=== @ $(hostname) : Local host DNS : Append HA-LB node entries to /etc/hosts"
 # @ local host, add each LB node entry (once) to /etc/hosts file
@@ -73,7 +76,7 @@ _ssh -x "
 echo '=== Install packages'
 _ssh -x sudo yum -y install keepalived haproxy psmisc 
 
-echo '=== Upload HA-LB cfg/conf template files'
+echo '=== Upload HA-LB configuration template files'
 printf "%s\n" $lb_config_files |xargs -IX /bin/bash -c '_ssh -u $1 .' _ X
 
 echo '=== Keepalived conf'
@@ -81,30 +84,40 @@ echo '=== Keepalived conf'
 pass="$(cat /proc/sys/kernel/random/uuid)" 
 ##...Static UUIDv5 namespaced (rotated) per day or so would be better.
 ## "priority VAL" of each SLAVE must be unique and lower than that of MASTER.
+target=/etc/keepalived/check_apiserver.sh
 _ssh -x "
-    chmod +x check_apiserver.sh
-    sudo cp -p check_apiserver.sh /etc/keepalived/
-    sudo sed -i 's/SET_VIP/$vip/' /etc/keepalived/check_apiserver.sh
-    sudo cp -p keepalived.conf /etc/keepalived/
-    sudo sed -i 's/SET_DEVICE/$device/' /etc/keepalived/keepalived.conf
-    sudo sed -i 's/SET_PASS/$pass/' /etc/keepalived/keepalived.conf
-    sudo sed -i 's/SET_VIP/$vip/' /etc/keepalived/keepalived.conf
+    sudo cp keepalived-check_apiserver.sh.tpl $target
+    sudo chmod +x $target
+    sudo sed -i 's/SET_VIP/$vip/' $target
+"
+target=/etc/keepalived/keepalived.conf
+_ssh -x "
+    sudo cp keepalived.conf.tpl $target
+    sudo sed -i 's/SET_DEVICE/$device/' $target
+    sudo sed -i 's/SET_PASS/$pass/' $target
+    sudo sed -i 's/SET_VIP/$vip/' $target
     [[ \$(hostname) == $lb_2_fqdn ]] && {
-        sudo sed -i 's/state MASTER/state SLAVE/'  /etc/keepalived/keepalived.conf
-        sudo sed -i 's/priority 255/priority 254/' /etc/keepalived/keepalived.conf
+        sudo sed -i 's/state MASTER/state SLAVE/'  $target
+        sudo sed -i 's/priority 255/priority 254/' $target
     }
 "
 
 echo '=== HAProxy cfg'
 ## Replace pattern "LB_?_FQDN LB_?_IPV4" with declared values.
+target=/etc/haproxy/haproxy.cfg
 _ssh -x "
-    sudo cp -p haproxy.cfg /etc/haproxy/
-    sudo sed -i 's/LB_1_FQDN[[:space:]]LB_1_IPV4/$lb_1_fqdn $lb_1_ipv4/' /etc/haproxy/haproxy.cfg
-    sudo sed -i 's/LB_2_FQDN[[:space:]]LB_2_IPV4/$lb_2_fqdn $lb_2_ipv4/' /etc/haproxy/haproxy.cfg
+    sudo mkdir -p /var/lib/haproxy/dev
+    sudo cp 99-haproxy.conf /etc/rsyslog.d/
+    sudo cp haproxy.cfg.tpl $target
+    sudo sed -i 's/LB_1_FQDN[[:space:]]LB_1_IPV4/$lb_1_fqdn $lb_1_ipv4/' $target
+    sudo sed -i 's/LB_2_FQDN[[:space:]]LB_2_IPV4/$lb_2_fqdn $lb_2_ipv4/' $target
+    sudo setsebool -P haproxy_connect_any 1
 "
 
 # Start and enable services
 _ssh -x '
+    sudo systemctl daemon-reload
+    sudo systemctl restart rsyslog.service
     sudo systemctl --now enable keepalived
     sudo systemctl --now enable haproxy
 '

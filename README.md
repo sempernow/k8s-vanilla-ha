@@ -20,24 +20,29 @@ Provision and configure all nodes for K8s
 
 Every target machine must be configured
 
-- Set hostname
+- Reset hostname
     ```bash
-    printf "%s\n" $ANSIBASH_TARGET_LIST \
-        |xargs -IX /bin/bash -c 'ssh $1 sudo hostnamectl set-hostname $1.local' _ X
+    export ANSIBASH_TARGET_LIST='a0 a1 a3' 
+    printf "%s\n" $ANSIBASH_TARGET_LIST |xargs -IX /bin/bash -c '
+        ssh $1 sudo hostnamectl set-hostname ${1}.local
+    ' _ X
     ```
-- Configure for ssh 
+- Configure for SSH
     - Add target "`IP_ADDR FQDN`" map to local DNS resolver.
     ```bash
     echo $vm_ip $vm_fqdn |sudo tee -a /etc/hosts
     ```
-    - Push key to target.
+    - Push SSH public key to target.
     ```bash
     hostfprs $vm_fqdn # Scan and list host fingerprint(s) (FPRs)
     # Validate host by matching host-claimed FPR against those scanned,
     # and push key if match.
     ssh-copy-id ~/.ssh/config/vm_common $vm_fqdn 
     ```
-    - Add target `Host` entry to `~/.ssh/config`.
+    - Add target `Host` entry to `~/.ssh/config`
+    ```bash
+    vim ~/.ssh/config
+    ```
 - Configure ssh user for automated/headless `sudo`
     - Create/Mod `/etc/sudoers.d/$USER` file at each target machine.
     ```bash
@@ -154,23 +159,23 @@ ssh $vm COMMAND ARGs
 ssh $vm /bin/bash -s < $script
 ```
 
-## HA Load Balancer | [HAProxy](http://docs.haproxy.org/) | [Keepalived](https://keepalived.org/)
+## HA Load Balancer : [HAProxy](http://docs.haproxy.org/) + [Keepalived](https://keepalived.org/)
 
->HAProxy and Keepalived utilize [Virtual Router Redundancy Protocol (VRRP)](https://en.wikipedia.org/wiki/Virtual_Router_Redundancy_Protocol) to implement a virtual Gateway Router having an IP address of VIP, and all the control nodes as its clients, load balancing requests to them. Connectivity to the VIP is maintained as long as one or more of its nodes are functioning. Our cluster is built with two such nodes that also function as the cluster's control nodes.
+>HAProxy and Keepalived utilize [Virtual Router Redundancy Protocol (VRRP)](https://en.wikipedia.org/wiki/Virtual_Router_Redundancy_Protocol) to implement a **virtual Gateway Router** having an IP address of VIP, and all the control nodes as its clients, load balancing requests to them. Connectivity to the VIP is maintained as long as one or more of its nodes are functioning. Our cluster is built with two such nodes that also function as the cluster's control nodes.
 
-### LB Architecture
+### HA LB Architecture
 
 ```text
-                      kubectl 
-                         |
-                   keepalived VIP
-                 192.168.0.100:8443
-              (Virtual Gateway Router)
-                         |
-            -----------------------------
-            |                           |
-    a0: 192.168.0.93            a1: 192.168.0.94
-    haproxy: 8443               haproxy: 8443        
+                        kubectl 
+                           |
+                     keepalived VIP
+                   192.168.0.100:8443
+                (Virtual Gateway Router)
+                           |
+              -----------------------------
+              |                           |
+    a0.local: 192.168.0.93      a1.local: 192.168.0.94
+    haproxy:        8443        haproxy:        8443        
     kube-apiserver: 6443        kube-apiserver: 6443 
 ```
 - VIP is the (highly-available) K8s control-plane endpoint
@@ -194,6 +199,20 @@ pushd ha-lb
 ./provision-ha-lb.sh
 popd
 ```
+- [`haproxy.cfg.tpl`](ha-lb/haproxy.cfg.tpl)
+    - `default_server`
+        - `inter 10s`: Sets the interval between health checks to 10 seconds.
+        - `downinter 5s`: Sets the interval between health checks when a server is considered down to 5 seconds.
+    - `rise 2`: The server is considered up after 2 successful health checks.
+    - `fall 2`: The server is considered down after 2 failed health checks.
+    - `slowstart 60s`: Gradually increases the load sent to a server that just came back up over 60 seconds.
+    - `maxconn 250`: Maximum number of concurrent connections allowed to a server.
+    - `maxqueue 256`: Maximum number of requests allowed to be queued when the server's `maxconn` is reached.
+    - `weight 100`: Sets the weight of the server in load balancing decisions.
+    - `check`: Enables health checking.
+    - `check-ssl`: Uses SSL for health checks.
+    - `verify none`: Disables SSL certificate verification in health checks.
+- [`keepalived.conf.tpl`](ha-lb/keepalived.conf.tpl)
 
 ### LB Verify
 
@@ -250,18 +269,182 @@ stat -fc %T /sys/fs/cgroup/
 ~~If cgroup v1, then set `kubelet` flag `--cgroup-driver` to `systemd`, else set to `cgroupfs`.~~
 Driver should match the container runtime setting, and if the parent processes are `systemd`, then should use that. 
 
-### [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/) | [Configuration](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-InitConfiguration)
-
->The preferred way to configure `kubeadm` is to pass an YAML configuration file with the `--config` option. Some of the configuration options defined in the [`kubeadm-config.yaml`](rhel/kubeadm-config.yaml) file are also available as command line flags, but only the most common/simple use case are supported with this approach.
-
-~~Map any commandline option "`--foo-bar=val`" to YAML key "`fooBar: val`".~~ Wrong. Can't do that. How to map, and even if they can be mapped, remains an undocumented mystery.
+### Cluster Initialization : [`kubeadm init`](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/)
 
 ```bash
-kubeadm config validate --config kubeadm-config.yaml
-kubeadm init --config kubeadm-config.yaml
+kubeadm init -v 5 --control-plane-endpoint $LOAD_BALANCER_IP:$LOAD_BALANCER_PORT --upload-certs --ignore-preflight-errors=Mem
+```
+- Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes. (Those uploaded certs are deleted after 2 hours.)
+
+
+In our case, on the 1st control-plane node:
+
+```bash
+# Pull images
+## Delcare registry and K8s version
+conf=kubeadm-config.yaml
+cat <<EOH |tee $conf
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: 1.28.4
+imageRepository: registry.k8s.io
+EOH
+## Pull
+ansibash sudo kubeadm config images pull --config $conf \
+    |& tee kubeadm.config.images.pull.log
+
+# Preflight phase only
+ansibash sudo kubeadm init phase preflight -v5 \
+    --ignore-preflight-errors=Mem \
+    |& tee kubeadm.init.phase.preflight.log
+
+# Initialize an HA cluster imperatively : Delete `--dry-run` line when ready.
+## All CIDRs are in the Private Address Space (RFC-1918)
+vipp='192.168.0.100:8443'
+pnet='10.10.0.0/12'
+snet='10.55.0.0/16'
+
+sudo kubeadm init -v5 \
+    --upload-certs \
+    --ignore-preflight-errors=Mem \
+    --control-plane-endpoint "$vipp" \
+    --pod-network-cidr "$pnet" \
+    --service-cidr "$snet" \
+    |& tee kubeadm.init.$(hostname).log
+
+# Configure the client (kubectl)
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# Verify
+## Status of kubelet.service (systemd unit)
+systemctl status kubelet.service
+
+## Make request to kube-apiserver  
+## Expect node "NotReady" due to lack of CNI addon 
+kubectl get node
+# NAME       STATUS     ROLES           AGE   VERSION
+# a0.local   NotReady   control-plane   16h   v1.28.3
+
+```
+- Running `sudo kubeadm init phase preflight` reveals preflight error(s) by name that must be overridden, each error `NAME` having with its own `--ignore-preflight-errors=NAME`, else error must be fixed out-of-band, else `kubeadm init` fails. 
+    - In our case, using Hyper-V machines for cluster nodes, its dynamic-memory allocation interfered with `kubeadm init` memory-requirements check, causing initialization failure due to a bogus insufficient-memory finding, reporting error name: "`Mem`".
+    ```text
+    [preflight] Some fatal errors occurred:
+        [ERROR Mem]: the system RAM (844 MB) is less than the minimum 1700 MB
+    ```
+- All K8s-core pods are Static Pods. Each is assigned the IP address of their node, 
+  unlike all other Pods that are created during or after the Pod Network (CIDR) 
+  is installed by whatever CNI-compliant network plugin is applied. (Ours is Calico).
+  Each Static Pod is managed directly by the `kubelet` running on its node; 
+  they are not of the control plane; not stored in etcd.  
+    - Location of Static Pod manifests (YAML):  
+      `/etc/kubernetes/manifests/`
+- Certs upload is good for 2hrs. After that, the certs are deleted, 
+  and must be regenerated at an existing control node.
+    ```bash
+    sudo kubeadm init phase upload-certs --upload-certs
+    ```
+    - Requires a new join command
+    ```bash
+    sudo kubeadm token create --print-join-command
+    ```
+- Status of node(s) remains `NotReady` until the "Pod Nework" 
+  is configured by installing a CNI-compliant addon such as Calico. 
+  Perform such installs at any Master node. See "Install Pod Network" section.
+
+### Join Command
+
+Get command:
+
+```bash
+kubeadm token create --print-join-command [--config kubeadm.config.yaml]
 ```
 
-#### `ClusterConfiguration` / `InitConfiguration` @ [`kubeadm-config.yaml`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/)
+If after reload (subsequent upload) of certificates
+
+```bash
+# Generate a NEW join COMMAND for control node (@ certs reload)
+## 1. Re upload certificates in the already working master node:
+kubeadm init phase upload-certs --upload-certs # Generate a new certificate key.
+## 2. Print join command in the already working master node:
+kubeadm token create --print-join-command
+## 3. Join a new control plane node:
+$JOIN_COMMAND_FROM_STEP2 --control-plane --certificate-key $KEY_FROM_STEP1.
+```
+```bash
+control_plane_endpoint='192.168.0.100:8443'
+sudo kubeadm join "$control_plane_endpoint" \
+    --ignore-preflight-errors=Mem \
+    --token $bootstrap_token \
+    --discovery-token-ca-cert-hash $ca_cert_hash \
+    --control-plane \
+    --certificate-key $certificate_key \
+    |& tee kubeadm.join.$(hostname).log
+```
+
+Okay to mix configuration file with most other flags
+
+```bash
+conf=kubeadm-config.yaml
+sudo kubeadm join "$control_plane_endpoint" \
+    --config $conf \
+    --ignore-preflight-errors=Mem \
+    --certificate-key $certificate_key
+    |& tee kubeadm.join.$(hostname).log
+ 
+```
+
+
+openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt |openssl rsa -pubin -outform der 2>/dev/null |openssl dgst -sha256 -hex |sed 's/^.* //'
+
+
+#### Join @ Control versus Worker node(s)
+
+Join commands in full often require more command flags;
+environment-dependent configuration:
+
+```bash
+# @ HA-LB configuration
+## If set properly during kubeadm init,
+## then this endpoint is shown at its join command.
+vip_endpoint='192.168.0.100:8443'
+api_server_endpoint="$vip_endpoint"
+
+# Join CONTROL node(s) into existing cluster
+sudo kubeadm join "$api_server_endpoint" \
+    --ignore-preflight-errors=Mem \
+    --token $bootstrap_token \
+    --discovery-token-ca-cert-hash $caCertHash \
+    --control-plane \
+    --certificate-key $certKey \
+    |& tee kubeadm.join.$(hostname).log
+
+# Join WORKER node(s) into existing cluster
+sudo kubeadm join "$api_server_endpoint" \
+    --ignore-preflight-errors=Mem \
+    --token $bootstrap_token \
+    --discovery-token-ca-cert-hash $caCertHash \
+    |& tee kubeadm.join.$(hostname).log
+
+```
+
+### `kubeadm` / `kubelet` [Configuration Manifests](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/#kubeadm-k8s-io-v1beta3-InitConfiguration)
+
+```bash
+conf=kubeadm-config.yaml
+kubeadm init --config $conf # Okay to add other commandline flags too.
+```
+- [`kubeadm-config.yaml`](kubeadm-config.yaml) ([`.tpl`](kubeadm-config.yaml.tpl))
+
+>*The preferred way to configure `kubeadm` is to pass an YAML configuration file with the `--config` option.* 
+>**However, this declarative method is rapidly evolving, and newer versions are often incompatible with those older.**
+
+Validate the configuration file
+
+```bash
+kubeadm config validate --config $conf
+```
 
 The configuration file used during `kubeadm init --config ...` [must include a `kind: ClusterConfiguration` document](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/#config-file). It may include all the following documents:
 
@@ -344,161 +527,30 @@ REFs:
     - [`JoinConfiguration`](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/#kubeadm-k8s-io-v1beta4-JoinConfiguration)
 - [`kubeadm config print --help`](https://pkg.go.dev/k8s.io/kubernetes@v1.28.4/cmd/kubeadm/app/apis/kubeadm/v1beta3) : Whereever configuration is not declared, defaults are used. Their manifests are printed by:
     - `kubeadm config print init-defaults`
-        ```yaml
-        apiVersion: kubeadm.k8s.io/v1beta3
-        kind: InitConfiguration
-        bootstrapTokens:
-        - groups:
-          - system:bootstrappers:kubeadm:default-node-token
-          token: abcdef.0123456789abcdef
-          ttl: 24h0m0s
-          usages:
-          - signing
-          - authentication
-        localAPIEndpoint:
-          advertiseAddress: 1.2.3.4
-          bindPort: 6443
-        nodeRegistration:
-          criSocket: unix:///var/run/containerd/containerd.sock
-          imagePullPolicy: IfNotPresent
-          name: node
-          taints: null
-        ---
-        apiVersion: kubeadm.k8s.io/v1beta3
-        kind: ClusterConfiguration
-        apiServer:
-          timeoutForControlPlane: 4m0s
-        certificatesDir: /etc/kubernetes/pki
-        clusterName: kubernetes
-        controllerManager: {}
-        dns: {}
-        etcd:
-          local:
-            dataDir: /var/lib/etcd
-        imageRepository: registry.k8s.io
-        kubernetesVersion: 1.28.0
-        networking:
-          dnsDomain: cluster.local
-          serviceSubnet: 10.96.0.0/12
-        scheduler: {}
-        ```
     - `kubeadm config print join-defaults`
-        ```yaml
-        apiVersion: kubeadm.k8s.io/v1beta3
-        kind: JoinConfiguration
-        caCertPath: /etc/kubernetes/pki/ca.crt
-        discovery:
-          bootstrapToken:
-            apiServerEndpoint: kube-apiserver:6443
-            token: abcdef.0123456789abcdef
-            unsafeSkipCAVerification: true
-          timeout: 5m0s
-          tlsBootstrapToken: abcdef.0123456789abcdef
-        nodeRegistration:
-          criSocket: unix:///var/run/containerd/containerd.sock
-          imagePullPolicy: IfNotPresent
-          name: a0.local
-          taints: null
-        ```
     - `kubeadm config print reset-defaults`
-        ```yaml
-        apiVersion: kubeadm.k8s.io/v1beta4
-        kind: ResetConfiguration
-        criSocket: unix:///var/run/containerd/containerd.sock
-        certificatesDir: /etc/kubernetes/pki
-        ```
 
-### Cluster Init
+#### Related configuration files:
+
+See `kubelet.service` `dropin` file for locations 
+of both `kubelet` and `kubeadm` configuration files:
 
 ```bash
-kubeadm init -v 5 --control-plane-endpoint $LOAD_BALANCER_IP:$LOAD_BALANCER_PORT --upload-certs --ignore-preflight-errors=Mem
+$ cat /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+# Note: This dropin only works with kubeadm and kubelet v1.11+
+[Service]
+Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+# This is a file that "kubeadm init" and "kubeadm join" generates at runtime, populating the KUBELET_KUBEADM_ARGS variable dynamically
+EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
+# This is a file that the user can use for overrides of the kubelet args as a last resort. Preferably, the user should use
+# the .NodeRegistration.KubeletExtraArgs object in the configuration files instead. KUBELET_EXTRA_ARGS should be sourced from this file.
+EnvironmentFile=-/etc/sysconfig/kubelet
+ExecStart=
+ExecStart=/usr/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
 ```
 
->Certificate Upload: The `--upload-certs` option uploads the certificates and keys generated during the initialization to the `kubeadm-certs` Secret in the `kube-system` namespace. This allows other control-plane nodes to retrieve these certificates and join the cluster as control-plane members. In a high-availability setup, each control-plane node needs access to these certificates to securely communicate with other control-plane nodes. Absent this option, certificates would have to be manually copied to other control-plane nodes.
-
-(Those uploaded certs are deleted after 2 hours.)
-
-
-In our case, on the 1st control-plane node:
-
-```bash
-# Pull images beforehand
-sudo kubeadm config images pull \
-    #--cri-socket unix:///run/cri-dockerd.sock \
-    |& tee kubeadm.config.images.pull.log
-
-# Preflight phase only
-sudo kubeadm init phase preflight -v5 \
-    --ignore-preflight-errors=Mem \
-    #--cri-socket unix:///run/cri-dockerd.sock \
-    |& tee kubeadm.init.phase.preflight.$(hostname).log
-
-# Initialize an HA cluster imperatively : Delete `--dry-run` line when ready.
-## All CIDRs are in the Private Address Space (RFC-1918)
-vipp='192.168.0.100:8443'
-pnet='10.10.0.0/12'
-snet='10.55.0.0/16'
-
-sudo kubeadm init -v5 \
-    --upload-certs \
-    --ignore-preflight-errors=Mem \
-    --control-plane-endpoint "$vipp" \
-    --pod-network-cidr "$pnet" \
-    --service-cidr "$snet" \
-    #--cri-socket unix:///run/cri-dockerd.sock \
-    |& tee kubeadm.init.$(hostname).log
-
-# Configure the client (kubectl)
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-
-# Verify
-## Status of kubelet.service (systemd unit)
-systemctl status kubelet.service
-
-## Make request to kube-apiserver  
-## Expect node "NotReady" due to lack of CNI addon 
-kubectl get node
-# NAME       STATUS     ROLES           AGE   VERSION
-# a0.local   NotReady   control-plane   16h   v1.28.3
-```
-- All K8s-core pods are Static Pods. Each is assigned the IP address of their node, 
-  unlike all other Pods that are created during or after the Pod Network (CIDR) 
-  is installed by whatever CNI-compliant network plugin is applied. (Ours is Calico).
-  Each Static Pod is managed directly by the `kubelet` running on its node; 
-  they are not of the control plane; not stored in etcd.  
-    - Location of Static Pod manifests (YAML):  
-      `/etc/kubernetes/manifests/`
-- Certs upload is good for 2hrs. After that, the certs are deleted, 
-  and must be regenerated at an existing control node.
-    ```bash
-    sudo kubeadm init phase upload-certs --upload-certs
-    ```
-    - Requires a new join command
-    ```bash
-    sudo kubeadm token create --print-join-command
-    ```
-- Status of node(s) remains `NotReady` until the "Pod Nework" 
-  is configured by installing a CNI-compliant addon such as Calico. 
-  Perform such installs at any Master node. See "Install Pod Network" section.
-
-#### ~~[Prevent "host network mode" at `kubeadm init`](https://chat.openai.com/share/c5c2284b-1b21-4196-a0c6-b1187de78654)~~
-
-UPDATE: Wrong: Neither `kubeadm` nor `kubelet` accept argument `--network-plugin`.
-
-**By default, `kubeadm init` will use the "host network mode" if it detects that the host machine is using it.**
-
-In a "host network mode", containers within a pod share the network namespace of the host machine, meaning they have the same network interfaces and (redundant) IP addresses as the host. This simplifies networking for core components like the kubelet, kube-proxy, and others.
-
-If the `kubelet` is operating in "host network mode", then the **core pods** (like those in the `kube-system` namespace) to **share the same IP address**. This is typically achieved using a technique called "host networking".
-
-How to prevent the "host network mode" when initializing a cluster using "kubeadm init"?
-
-To prevent using "host network mode" when initializing a  cluster with `kubeadm init`, 
-ensure that the `kubelet` is configured to the Network Plugin, not the host network. 
-This is accomplished by setting the flag `--network-plugin` at a `kubadm` configuration:
-
-Create/Edit the kubelet config
+##### Create/Edit `kubelet` config
 
 @ `/etc/systemd/system/kubelet.service.d/10-kubeadm.conf`
 
@@ -512,24 +564,15 @@ suco touch /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
 [Service]
 Environment="KUBELET_KUBEADM_ARGS=--network-plugin=calico"
 ```
-- ??? Or, by [kublet-kubeadm integration](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/kubelet-integration/)
-- ??? Or [@ `/var/lib/kubelet/kubeadm-flags.env`](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/kubelet-integration/)
+- See [kublet-kubeadm integration](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/kubelet-integration/)
+- See [`/var/lib/kubelet/kubeadm-flags.env`](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/kubelet-integration/)
 
-then restart `kubelet`
+After making changes, restart the `kubelet`
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart kubelet
 ```
-
-
-Declare Pod CIDR on init:
-
-```bash
-sudo kubeadm init --pod-network-cidr=10.244.0.0/16
-```
-- Must align with that of the chosen CNI-compliant Network Plugin  
-
 
 ### Cluster-init Verify / Troubleshoot  (Pre CNI addon)
 
@@ -609,40 +652,13 @@ manifests, and data store, purging `etcd`.
 Yet the RPM package installations, Docker images and such are unharmed, 
 leaving the node (host OS) ready for the next run of "`kubeadm init`". 
 
-```bash
-sudo kubeadm cordon $node
-sudo kubeadm drain $node
-kubectl delete -f calico.yaml
-kubectl get deploy -A |xargs -IX -c /bin/bash -c 'kubectl delete ' _ X
-sudo kubeadm reset
-sudo systemctl disable --now containerd.service
-sudo rm -rf /var/lib/containerd/*
-sudo rm -rf ~/.kube/*
-sudo rm -rf /var/lib/cni
-sudo rm -rf /etc/cni
-```
+@ Control node : [`teardown.sh`](teardown.sh)
 
 @ Admin machine (Windows/WSL)
 
 ```bash
-# Teardown
-## Environment
 export ANSIBASH_TARGET_LIST='a0 a1 a2 a3'
-
-## Delete all addons
-ansibash 'kubectl delete -f calico.yaml'
-
-
-## Delete K8s core
-ansibash 'sudo kubeadm reset'a
-ansibash 'rm -rf ~/.kube/*'
-
-## Verify
-ansibash 'ls -hal ~/.kube'
-ansibash 'ls -hl /etc/kubernetes/manifests'
-ansibash 'psk'
-ansibash 'systemctl status kubelet.service'
-ansibash 'systemctl status kubelet.service |tail -n 3'
+ansibash -s teardown/teardown.sh
 
 # Prep for init
 ansibash 'sudo reboot'
