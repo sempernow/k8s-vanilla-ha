@@ -69,7 +69,7 @@ menu :
 # @env |grep _IMAGE |grep -v APP_IMAGE
 
 push :
-	gc && echo && git push
+	gc && echo && git push && gl
 
 html : md2html perms
 
