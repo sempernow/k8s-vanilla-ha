@@ -23,7 +23,7 @@ vrrp_instance VI_1 {
     priority 255
     authentication {
         auth_type PASS
-        auth_pass 5b803224-bf37-46f1-ae78-f49a7ebedd8a
+        auth_pass 58940ae5-5e76-4291-9746-381b3f6e25c3
     }
     virtual_ipaddress {
         192.168.0.100/24

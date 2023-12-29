@@ -3,22 +3,18 @@
 #
 # Documentation : http://www.haproxy.org/download/2.9/doc/
 #
+# Validate config: haproxy -c -f /etc/haproxy/haproxy.cfg 
+#
 # Configure rsyslog @ /etc/rsyslog.d/99-haproxy.conf
+# (See ./haproxy-rsyslog.conf)
 #
-# See log:
-#   sudo cat /var/log/haproxy.log 
-#   sudo journalctl -u haproxy.service
-#
-# MUST KEEP COMMENT LINES: "#  local2.* ..." thru "#log     127.0..."
+# See logs:
+#   sudo cat /var/log/haproxy.log       # rsyslog.service
+#   sudo journalctl -u haproxy.service  # journald.service
 #---------------------------------------------------------------------
 
 global
-
-    #    local2.*                     /var/log/haproxy.log
-    #
-        #log        127.0.0.1 local2
         log         /dev/log local0
-        
         chroot      /var/lib/haproxy
         pidfile     /var/run/haproxy.pid
         user        haproxy
@@ -67,10 +63,12 @@ frontend k8s-ingress-http
     
 ## Backend for K8s Ingress by HTTP
 backend k8s-ingress-http
+    option      httpchk GET /
+    http-check  expect status 200
     option    ssl-hello-chk
-    balance   roundrobin
-    server    LB_1_FQDN LB_1_IPV4:80
-    server    LB_2_FQDN LB_2_IPV4:80
+    balance   leastconn
+    server    LB_1_FQDN LB_1_IPV4:30080
+    server    LB_2_FQDN LB_2_IPV4:30080
 
 ## Frontend for K8s Ingress HTTPS
 frontend k8s-ingress-https
@@ -80,8 +78,10 @@ frontend k8s-ingress-https
     
 ## Backend for K8s Ingress HTTPS
 backend k8s-ingress-https
+    option      httpchk GET /
+    http-check  expect status 200
     option    ssl-hello-chk
-    balance   roundrobin
-    server    LB_1_FQDN LB_1_IPV4:443
-    server    LB_2_FQDN LB_2_IPV4:443
+    balance   leastconn
+    server    LB_1_FQDN LB_1_IPV4:30443
+    server    LB_2_FQDN LB_2_IPV4:30443
 

@@ -1,13 +1,26 @@
 #!/usr/bin/env bash
+
+vm_ip(){
+    # Print IPv4 address of an ssh-configured Host ($1). 
+    [[ $1 ]] || exit 99
+    echo $(cat ~/.ssh/config |grep -A4 -B2 $1 |grep Hostname |head -n 1 |cut -d' ' -f2)
+}
+
 halb(){
     pushd ha-lb 
-
-    lb_1_fqdn='a0.local'
-    lb_2_fqdn='a1.local'
-    device='eth0' # Applicable network interface device common to all LB nodes
     ## VIP must be static and not assignable by the DHCP server.
     vip='192.168.0.100' 
     vip6='::ffff:c0a8:64'
+    device='eth0' # Network device common to all LB nodes
+    ## Set FQDN
+    lb_1_fqdn='a0.local'
+    lb_2_fqdn='a1.local'
+    ## Get/Set IP address of each LB node from ~/.ssh/config
+    lb_1_ipv4=$(vm_ip ${lb_1_fqdn%%.*})
+    lb_2_ipv4=$(vm_ip ${lb_2_fqdn%%.*})
+    ## Smoke test these gotten node-IP values : Abort on fail
+    [[ $lb_1_ipv4 ]] || { echo '=== FAIL @ lb_1_ipv4';exit 22; }
+    [[ $lb_2_ipv4 ]] || { echo '=== FAIL @ lb_2_ipv4';exit 22; }
 
     target=keepalived-check_apiserver.sh
     cp ${target}.tpl $target

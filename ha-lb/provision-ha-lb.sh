@@ -11,33 +11,32 @@
 # This script requires its PWD to be its own directory.
 cd "${BASH_SOURCE%/*}"
 
+set -a  # Export all
+
 vm_ip(){
     # Print the IPv4 address of an ssh-configured Host ($1). See ~/.ssh/config.
     [[ $1 ]] || exit 99
     echo $(cat ~/.ssh/config |grep -A4 -B2 $1 |grep Hostname |head -n 1 |cut -d' ' -f2)
 }
 
-set -a  # Export all
-
 # Environment
 echo '=== Environment'
 lb_config_files="keepalived.conf.tpl keepalived-check_apiserver.sh.tpl haproxy.cfg.tpl haproxy-99-haproxy.conf"
 ## Reset these LB-node values per Hypervisor/VM environment 
 ssh_configured_hosts='a0 a1'
-lb_1_fqdn='a0.local'
-lb_2_fqdn='a1.local'
-device='eth0' # Applicable network interface device common to all LB nodes
 ## VIP must be static and not assignable by the DHCP server.
 vip='192.168.0.100' 
 vip6='::ffff:c0a8:64'
-## Get IP address of each LB node from ~/.ssh/config
+device='eth0' # Network device common to all LB nodes
+## Set FQDN
+lb_1_fqdn='a0.local'
+lb_2_fqdn='a1.local'
+## Get/Set IP address of each LB node from ~/.ssh/config
 lb_1_ipv4=$(vm_ip ${lb_1_fqdn%%.*})
 lb_2_ipv4=$(vm_ip ${lb_2_fqdn%%.*})
 ## Smoke test these gotten node-IP values : Abort on fail
-[[ $(echo ${lb_1_ipv4} |cut -d'.' -f4) ]] \
-    || { echo '=== FAIL @ lb_1_ipv4';exit 22; }
-[[ $(echo ${lb_2_ipv4} |cut -d'.' -f4) ]] \
-    || { echo '=== FAIL @ lb_2_ipv4';exit 22; }
+[[ $lb_1_ipv4 ]] || { echo '=== FAIL @ lb_1_ipv4';exit 22; }
+[[ $lb_2_ipv4 ]] || { echo '=== FAIL @ lb_2_ipv4';exit 23; }
 
 # Agent
 _ssh() { 
