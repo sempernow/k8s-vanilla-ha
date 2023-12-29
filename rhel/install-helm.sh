@@ -2,7 +2,7 @@
 # https://helm.sh/docs/intro/install/
 
 arch=amd64
-ver='3.13.3'
+ver='3.13.3' # Release info is a well kept secret of Helm project!
 
 echo '=== Download/Install : helm'
 [[ $(helm version 2>&1 |grep $ver) ]] && {

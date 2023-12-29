@@ -1,38 +1,54 @@
 #!/usr/bin/env bash
 # https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements
 # CKA Method is manifest method; not advised by Calico:
-# kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
 # Calico advises Operator method:
 # https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises
 # 
-exit # WIP
 
-# Manifest Method 
-# https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises
-ver='3.26.4'
-wget -nv https://raw.githubusercontent.com/projectcalico/calico/v${ver}/manifests/calico.yaml
-kubectl apply -f calico.yaml
+ver='3.27.0'
+export base=https://raw.githubusercontent.com/projectcalico/calico/v${ver}/manifests
 
-exit
+manifest_method() {
+    # Manifest Method 
+    # https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises
+    wget -nv -O calico.yaml $base/calico.yaml
+    kubectl apply -f calico.yaml
+}
 
-# Operator Method
-export calico_manifests='https://raw.githubusercontent.com/projectcalico/calico/v3.26.3/manifests'
-## 1. Install the Tigera Calico operator
-kubectl create -f $calico_manifests/tigera-operator.yaml
+operator_method(){
+    # Operator Method
+    
+    ## 1. Install the Tigera Calico operator
+    wget -nv $base/tigera-operator.yaml
+    kubectl create -f tigera-operator.yaml
+    ## 2. Download CRDs
+    wget -nv $base/custom-resources.yaml
+    ## Modify calico.yaml
+    vim custom-resources.yaml
+    ### https://docs.tigera.io/calico/latest/reference/installation/api
+    ## Install CRDs
+    kubectl create -f custom-resources.yaml
+    ## 3. Verify/Monitor
+    #watch kubectl get pods -n calico-system
+    ## 4. UPDATE : calicoctl NOT NECESSARY; use Calico API server instead
+    ## 4. Install calicoctl binary on signle node
+    ### https://docs.tigera.io/calico/latest/operations/calicoctl/install
+    # wget -nv -O calicoctl https://github.com/projectcalico/calico/releases/download/v${ver}/calicoctl-linux-amd64
+    # sudo mv calicoctl /usr/local/bin/calicoctl
+    # sudo chmod +x /usr/local/bin/calicoctl
+    ## 4. Install Calico API server
+    wget -nv -O calico-apiserver.yaml $base/apiserver.yaml
+    kubectl create -f calico-apiserver.yaml
 
-## 2. Download CRDs
-wget -nv $calico_manifests/custom-resources.yaml
-## Modify calico.yaml
-### https://docs.tigera.io/calico/latest/reference/installation/api
-## Install CRDs
-kubectl create -f custom-resources.yaml
+    ## 6. Configure BGP
+    ### https://docs.tigera.io/calico/latest/networking/configuring/bgp
 
-# 3. Monitor
-watch kubectl get pods -n calico-system
+    ## Next Steps
+    ### https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises#next-steps
 
-# Next Steps
-## https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises#next-steps
+    # Remove taints on control plane so can schedule workloads on node.
+    # kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+    # kubectl taint nodes --all node-role.kubernetes.io/master-
+}
 
-# Remove taints on control plane so can schedule workloads on node.
-# kubectl taint nodes --all node-role.kubernetes.io/control-plane-
-# kubectl taint nodes --all node-role.kubernetes.io/master-
+manifest_method

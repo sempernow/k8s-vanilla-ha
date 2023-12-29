@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # @ https://docs.cilium.io/en/stable/gettingstarted/k8s-install-default/
+exit 
 
 CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
 CLI_ARCH=amd64
