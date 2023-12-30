@@ -7,7 +7,7 @@ vm_ip(){
 }
 
 halb(){
-    pushd ha-lb 
+    pushd halb 
     ## VIP must be static and not assignable by the DHCP server.
     vip='192.168.0.100' 
     vip6='::ffff:c0a8:64'
@@ -35,10 +35,10 @@ halb(){
     sed -i "s/SET_PASS/$pass/" $target
     sed -i "s/SET_VIP/$vip/" $target
     ## "priority VAL" of each SLAVE must be unique and lower than that of MASTER.
-    cp $target keepalived-$lb_1_fqdn.sh
-    cp $target keepalived-$lb_2_fqdn.sh
+    cp $target keepalived-$lb_1_fqdn.conf
+    cp $target keepalived-$lb_2_fqdn.conf
     rm $target
-    target=keepalived-$lb_2_fqdn.sh
+    target=keepalived-$lb_2_fqdn.conf
     sed -i "s/state MASTER/state SLAVE/"  $target
     sed -i "s/priority 255/priority 254/" $target
 

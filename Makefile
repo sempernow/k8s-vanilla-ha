@@ -62,6 +62,7 @@ menu :
 	@echo "push    : gc && git push"
 	@echo "k8conf  : Generate ${K8S_KUBEADM_CONFIG} from .tpl"
 	@echo "lbconf  : Generate HA-LB (HAProxy and Keepalived) conf from .tpl"
+	@echo "lbpush  : Push HA-LB configuration to HA-LB nodes"
 
 # $(INFO) 'Environment'
 # @echo "PWD=${PRJ_ROOT}"
@@ -102,5 +103,8 @@ k8conf :
 		|sed '/^ *#/d' |sed '/^\s*$$/d' \
 		|tee ${K8S_KUBEADM_CONFIG}
 
-lbconf :
+lbconf halb :
 	bash make.recipes.sh halb
+
+lbpush:
+	bash halb/push-halb.sh

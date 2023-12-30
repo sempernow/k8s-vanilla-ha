@@ -189,17 +189,17 @@ ssh $vm /bin/bash -s < $script
 - Keepalived service runs on all control nodes to provide `VIP` address at one of the nodes.
 - `kubectl` clients connect to this HA endpoint of the K8s control plane (`VIP:8443`).
 
-### LB Install and Configure ([`provision-ha-lb.sh`](ha-lb/provision-ha-lb.sh))
+### LB Install and Configure ([`provision-halb.sh`](halb/provision-halb.sh))
 
 Modify the provisioning script as necessary 
 to account for the parameters of your network and nodes.
 
 ```bash
-pushd ha-lb
-./provision-ha-lb.sh
+pushd halb
+./provision-halb.sh
 popd
 ```
-- [`haproxy.cfg.tpl`](ha-lb/haproxy.cfg.tpl)
+- [`haproxy.cfg.tpl`](halb/haproxy.cfg.tpl)
     - `default_server`
         - `inter 10s`: Sets the interval between health checks to 10 seconds.
         - `downinter 5s`: Sets the interval between health checks when a server is considered down to 5 seconds.
@@ -212,7 +212,7 @@ popd
     - `check`: Enables health checking.
     - `check-ssl`: Uses SSL for health checks.
     - `verify none`: Disables SSL certificate verification in health checks.
-- [`keepalived.conf.tpl`](ha-lb/keepalived.conf.tpl)
+- [`keepalived.conf.tpl`](halb/keepalived.conf.tpl)
 
 ### LB Verify
 
