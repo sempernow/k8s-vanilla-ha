@@ -282,12 +282,14 @@ In our case, on the 1st control-plane node:
 ```bash
 # Pull images
 ## Delcare registry and K8s version
-conf=kubeadm-config.yaml
+ver='1.28.5'
+reg=registry.k8s.io
+conf=kubeadm-config-images.yaml
 cat <<EOH |tee $conf
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
-kubernetesVersion: 1.28.4
-imageRepository: registry.k8s.io
+kubernetesVersion: $ver
+imageRepository: $reg
 EOH
 ## Pull
 ansibash sudo kubeadm config images pull --config $conf \
@@ -300,11 +302,12 @@ ansibash sudo kubeadm init phase preflight -v5 \
 
 # Initialize an HA cluster imperatively : Delete `--dry-run` line when ready.
 ## All CIDRs are in the Private Address Space (RFC-1918)
+ver='1.28.5'
 vipp='192.168.0.100:8443'
-pnet='10.10.0.0/12'
+pnet='10.10.0.0/16'
 snet='10.55.0.0/16'
 
-sudo kubeadm init -v5 \
+sudo kubeadm init -v5 --kubernetes-version $ver \
     --upload-certs \
     --ignore-preflight-errors=Mem \
     --control-plane-endpoint "$vipp" \
