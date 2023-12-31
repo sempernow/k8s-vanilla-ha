@@ -13,6 +13,7 @@ cd "${BASH_SOURCE%/*}"
 ssh_configured_lb_nodes='a0 a1'
 
 printf "%s\n" $ssh_configured_lb_nodes |xargs -IX /bin/bash -c '
+    echo "=== @ $1"
     scp keepalived-${1}.local.conf ${1}:keepalived.conf
     scp keepalived-check_apiserver.sh ${1}:keepalived-check_apiserver.sh
     scp haproxy.cfg ${1}:haproxy.cfg

@@ -27,8 +27,8 @@ global
 defaults
     log             global
     mode            tcp
-    option          tcplog
     option          tcp-check
+    option          tcplog
     option          dontlognull
     option          log-health-checks
     option          redispatch
@@ -40,7 +40,9 @@ defaults
     #timeout         http-request    10s
     #timeout         http-keep-alive 10s
     timeout         check           10s
-    default-server  check send-proxy inter 10s downinter 5s rise 2 fall 2 slowstart 60s maxconn 250 maxqueue 256 weight 100
+    # @ send-proxy (mode: tcp or http) : Adds header: 
+    # PROXY TCP4 <client-ip> <vip> <ephemeral-port> <frontend-port>
+    default-server check inter 10s downinter 5s rise 2 fall 2 slowstart 60s maxconn 250 maxqueue 256 weight 100
 
 ## Frontend for K8s API Server
 frontend k8s-apiserver
@@ -51,7 +53,7 @@ frontend k8s-apiserver
 backend k8s-apiserver
     #option      httpchk GET /healthz
     #http-check  expect status 200
-    option      ssl-hello-chk
+    #option      ssl-hello-chk
     balance     roundrobin
     server      LB_1_FQDN LB_1_IPV4:6443 
     server      LB_2_FQDN LB_2_IPV4:6443 
@@ -65,10 +67,10 @@ frontend k8s-ingress-http
 backend k8s-ingress-http
     #option      httpchk GET /
     #http-check  expect status 200
-    option      ssl-hello-chk
+    #option      ssl-hello-chk
     balance     leastconn
-    server      LB_1_FQDN LB_1_IPV4:30080 
-    server      LB_2_FQDN LB_2_IPV4:30080 
+    server      LB_1_FQDN LB_1_IPV4:30080 send-proxy
+    server      LB_2_FQDN LB_2_IPV4:30080 send-proxy
 
 ## Frontend for K8s Ingress HTTPS
 frontend k8s-ingress-https
@@ -77,8 +79,8 @@ frontend k8s-ingress-https
     
 ## Backend for K8s Ingress HTTPS
 backend k8s-ingress-https
-    option      ssl-hello-chk
+    #option      ssl-hello-chk
     balance     leastconn
-    server      LB_1_FQDN LB_1_IPV4:30443 
-    server      LB_2_FQDN LB_2_IPV4:30443 
+    server      LB_1_FQDN LB_1_IPV4:30443 send-proxy
+    server      LB_2_FQDN LB_2_IPV4:30443 send-proxy
 

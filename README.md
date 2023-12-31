@@ -404,6 +404,9 @@ openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt |openssl rsa -pubin -outform
 
 #### Join @ Control versus Worker node(s)
 
+Install Pod Network addon after cluster initialization (1st control node), 
+before adding more nodes.
+
 Join commands in full often require more command flags;
 environment-dependent configuration:
 
