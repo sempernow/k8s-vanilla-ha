@@ -46,3 +46,19 @@ sysctl --system
 sudo crictl config --set \
     runtime-endpoint=unix:///run/containerd/containerd.sock
 echo 'after initializing the control node, follow instructions and use kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml to install the calico plugin (control node only). On the worker nodes, use sudo kubeadm join ... to join'
+
+exit 0
+######
+
+##################
+# Upgrade kubectl
+##################
+##  Step1: Run the below command to download the latest version of kubectl
+curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+
+##  Step2: Make kubectl executable
+chmod +x kubectl
+
+##  Step3: Move it to the directory where kubectl is already installed
+sudo mv kubectl $(which kubectl)
+
