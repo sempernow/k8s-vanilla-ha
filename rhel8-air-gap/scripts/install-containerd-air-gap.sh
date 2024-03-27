@@ -98,7 +98,7 @@ conf='/etc/modules-load.d/k8s-containerd.conf'
 conf='/etc/sysctl.d/k8s-containerd.conf'
 [[ -f $conf ]] || {
     echo '=== Configure containerd (CRI runtime) : Set iptables bridging'
-	cat <<-EOF |sudo tee $conf
+	cat <<-EOF |sudo tee /etc/sysctl.d/k8s-containerd.conf
 	net.bridge.bridge-nf-call-iptables  = 1
 	net.bridge.bridge-nf-call-ip6tables = 1
 	net.ipv4.ip_forward                 = 1
@@ -143,9 +143,9 @@ conf='/etc/containerd/config.toml'
 	    [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
 	      [plugins."io.containerd.grpc.v1.cri".registry.mirrors."$registry"]
 	        endpoint = ["http://$registry"]
-	    [plugins."io.containerd.grpc.v1.cri".registry.configs]
-	      [plugins."io.containerd.grpc.v1.cri".registry.configs."$registry".tls]
-	        insecure_skip_verify = true
+        [plugins."io.containerd.grpc.v1.cri".registry.configs]
+          [plugins."io.containerd.grpc.v1.cri".registry.configs."$registry".tls]
+            insecure_skip_verify = true
 	EOH
     flag=1
     [[ -f $conf ]] || { 
@@ -171,17 +171,15 @@ ver='v1.29.0'
     echo 'Make sudo link to cri-tools'
 
     # CRI tools require sudo to run, yet are not in sudo PATH, so create soft link
-    # CRI tools require sudo to run, yet are not in sudo PATH, so create soft link
-    [[ -f /usr/local/bin/crictl ]] || {
-        [[ -f /usr/sbin/crictl  ]] || sudo ln -s /usr/sbin/crictl /usr/local/bin/crictl
-    }
-    [[ -f /usr/local/bin/critest ]] || {
-        [[ -f /usr/sbin/critest ]] || sudo ln -s /usr/sbin/critest /usr/local/bin/critest
-    }
+    sudo rm -f /usr/local/bin/crictl
+    sudo rm -f /usr/local/bin/critest
+    sudo ln -s /usr/sbin/crictl /usr/local/bin/crictl
+    sudo ln -s /usr/sbin/critest /usr/local/bin/critest
+    
+    sleep 1
     flag=1
 
     # Verify sudoer access 
-    sleep 1 # Allow for (NFS) latency
     sudo crictl --version >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ crictl sudoer config'; exit 40; }
     sudo critest --version >/dev/null 2>&1 ;(( $? )) && { echo '=== FAIL @ critest sudoer config'; exit 41; }
 

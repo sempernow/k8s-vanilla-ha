@@ -13,12 +13,12 @@ zone=$(sudo firewall-cmd --get-active-zone |head -n1)
     echo 'FAIL @ --get-active-zone'
     exit 1
 }
-svc=calico 
+svc=cilium
 at="--permanent --zone=$zone --service=$svc"
 echo "=== Configure firewalld : $at ..."
 
 # Define service (idempotent)
-[[ $(sudo firewall-cmd --get-services |grep $svc) ]] || \
+[[ $(sudo firewall-cmd --get-services |grep "$svc ") ]] || \
     sudo firewall-cmd --permanent --zone=$zone --new-service=$svc
 
 sudo firewall-cmd $at --set-description="Allow ports for Cilium : cilium-operator, cilium-agent, Hubble Relay and server, Spire Agent, Prometheus metrics, and Wireguard tunnel"

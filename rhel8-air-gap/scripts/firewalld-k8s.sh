@@ -14,7 +14,7 @@ zone=$(sudo firewall-cmd --get-active-zone |head -n1)
 ## @ Worker nodes
 svc='k8s-workers'
 at="--permanent --zone=$zone --service=$svc"
-echo "=== Configure firewalld : $at ..."
+echo "=== Configure firewalld @ $at"
 # Define service (idempotent)
 [[ $(sudo firewall-cmd --get-services |grep $svc) ]] || \
     sudo firewall-cmd --permanent --zone=$zone --new-service=$svc

@@ -20,15 +20,19 @@ images(){
 }
 export -f images 
 
+
+
+# @ kubelet, kubeadm, kubectl
 ok(){
-    # @ kubelet, kubeadm, kubectl
+    # https://github.com/kubernetes/kubernetes/releases
     # https://kubernetes.io/releases/
     # https://www.downloadkubernetes.com/
     # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
     ver="$(curl -sSL https://dl.k8s.io/release/stable.txt)" # @ v1.29.2
-    [[ $(./kubernetes-$ver/kubeadm version |grep $ver) ]] && return 0
-    mkdir -p kubernetes-$ver
-    pushd kubernetes-$ver
+    dir="kubernetes-$ver"
+    [[ $(./$dir/kubeadm version |grep $ver) ]] && return 0
+    mkdir -p $dir
+    pushd $dir 
     base="https://dl.k8s.io/release/${ver}/bin/linux/${ARCH}"
     wget -nv ${base}/kubeadm
     wget -nv ${base}/kubelet
@@ -61,8 +65,8 @@ ok(){
 }
 ok 
 
+# @ cni-plugins (kubernetes-cni)
 ok(){
-    # @ cni-plugins (kubernetes-cni)
     # https://github.com/containernetworking/plugins/releases
     ver="1.4.0" 
     #dir="/opt/cni/bin" # REF @ install
@@ -75,8 +79,8 @@ ok(){
 }
 ok
 
+# @ containerd binaries
 ok(){
-    # @ containerd binaries
     # https://github.com/containerd/containerd/blob/main/docs/getting-started.md
     # https://github.com/containerd/containerd/releases
     ver='1.7.14' # NEWER than Docker CE version 
@@ -95,8 +99,8 @@ ok(){
 }
 ok
 
+# @ runc : low-level utility : used by containerd
 ok(){
-    # @ runc : low-level utility : used by containerd
     # https://github.com/opencontainers/runc/releases
     # https://github.com/containerd/containerd/blob/main/docs/getting-started.md
     ver='1.1.12'
@@ -108,8 +112,8 @@ ok(){
 }
 ok
 
+# @ cri-tools
 ok(){
-    # @ cri-tools
     # https://github.com/kubernetes-sigs/cri-tools/releases
     ver="1.29.0"
     dir="cri-tools-$ver"
@@ -124,8 +128,8 @@ ok(){
 }
 ok
 
+# @ Docker binaries
 ok(){
-    # @ Docker binaries
     ver='25.0.4'
     dir="docker-$ver"
     [[ -d $dir && $(./$dir/docker --version 2>&1 |grep $ver) ]] && return 0
@@ -141,8 +145,8 @@ ok(){
 }
 ok
 
+# @ cri-dockerd : Docker CRI-compliant shim 
 ok(){
-    # Docker CRI-compliant shim : cri-dockerd
     # Usage: kubeadm ... --cri-socket /run/cri-dockerd.sock
     # https://github.com/Mirantis/cri-dockerd
     # https://kubernetes.io/blog/2022/02/17/dockershim-faq/
@@ -178,8 +182,8 @@ ok(){
 }
 ok
 
+# @ etcd, etcdctl, etcdutl 
 ok(){
-    # @ etcd, etcdctl, etcdutl 
     # https://github.com/etcd-io/etcd 
     # https://github.com/etcd-io/etcd/releases/
     ver='v3.5.12'
@@ -197,8 +201,8 @@ ok(){
 }
 ok
 
+# @ Kustomize
 ok(){
-    # @ Kustomize
     # https://github.com/kubernetes-sigs/kustomize/releases
     ver='5.3.0'
     dir="kustomize-$ver"
@@ -212,8 +216,8 @@ ok(){
 }
 ok
 
+# @ Helm 
 ok(){
-    # @ Helm 
     # https://helm.sh/docs/intro/install/
     # https://github.com/helm/helm/releases
     ver='v3.14.2'
@@ -226,8 +230,8 @@ ok(){
 }
 ok
 
+# @ Trivy
 ok(){
-    # @ Trivy
     # https://github.com/aquasecurity/trivy/releases 
     ver='0.49.1'
     dir="trivy-$ver"
@@ -241,8 +245,8 @@ ok(){
 }
 ok
 
+# @ yq 
 ok(){
-    # @ yq 
     # https://github.com/mikefarah/yq/releases
     ver='v4.42.1'
     dir="yq-$ver"
@@ -257,8 +261,8 @@ ok(){
 }
 ok
 
+# @ nerdctl : Docker-compatible CLI for containerd 
 ok(){
-    # @ nerdctl : Docker-compatible CLI for containerd 
     # https://github.com/containerd/nerdctl
     # https://github.com/containerd/nerdctl/releases
     # Full : bin/ (binaries), lib/ (systemd configs), libexec/ (cni plugins), share/ (docs)
@@ -275,8 +279,8 @@ ok(){
 }
 ok 
 
+# @ Cilium
 ok(){
-    # @ Cilium
     # https://github.com/cilium/cilium
     # https://github.com/cilium/cilium/releases
     # https://docs.cilium.io/en/stable/gettingstarted/k8s-install-default/#create-the-cluster
@@ -298,7 +302,7 @@ ok(){
     chart='cilium'
     # Download/save chart, and extract/save its image dependencies (list) and values.yaml
     # https://artifacthub.io/packages/helm/cilium/cilium/
-    helm pull --version $ver $repo/$chart && {
+    helm pull $repo/$chart --version $ver && {
         [[ $(type -t hdi) ]] && {
             tar -xaf ${chart}-$ver.tgz && hdi $chart && cp -p $chart/values.yaml . && rm -rf $chart
         } 
@@ -307,8 +311,8 @@ ok(){
 }
 ok
 
+# @ Calico : Manifest Method
 ok(){
-    # @ Calico : Manifest Method
     ver='3.27.2'
     dir="calico-$ver"
     [[ -f $dir/calico.yaml ]] && return 0
@@ -320,8 +324,8 @@ ok(){
 }
 ok 
 
+# @ Ingress NGINX Controller 
 ok(){
-    # @ Ingress NGINX Controller 
     # https://github.com/kubernetes/ingress-nginx/releases
     # https://github.com/kubernetes/ingress-nginx
     # https://kubernetes.github.io/ingress-nginx/deploy/#bare-metal-clusters
@@ -343,7 +347,7 @@ ok(){
     #ver='1.9.5' # App
     release='ingress-nginx'
     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-    helm pull --version $ver $repo/$chart && {
+    helm pull $repo/$chart --version $ver && {
         [[ $(type -t hdi) ]] && {
             tar -xaf ${chart}-${ver}.tgz && hdi $chart && cp -p $chart/values.yaml . && rm -rf $chart
         } 
@@ -351,135 +355,188 @@ ok(){
 }
 ok
 
-exit 0
-
-
-
 # @ Argo CD 
-# https://github.com/argoproj/argo-cd/releases
-# https://argo-cd.readthedocs.io/en/stable/getting_started/?_gl=1*1mxdlxv*_ga*MTQwODE5OTE5Ni4xNzEwMTYwNjYz*_ga_5Z1VTPDL73*MTcxMDE2MDY2My4xLjAuMTcxMDE2MDY2Ny4wLjAuMA..
-ver='2.10.2'
-mkdir -p argocd-$ver
-pushd argocd-$ver
-## Argo CLI
-wget -nv https://github.com/argoproj/argo-cd/releases/download/v${ver}/argocd-linux-amd64
-## Argo manifest
-#kubectl create namespace argocd
-#kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v${ver}/manifests/install.yaml
-wget -nv -O argocd.yaml https://raw.githubusercontent.com/argoproj/argo-cd/v${ver}/manifests/install.yaml
-# Argo HA manifest
-#kubectl create namespace argocd
-#kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v${ver}/manifests/ha/install.yaml
-wget -nv -O argocd-ha.yaml https://raw.githubusercontent.com/argoproj/argo-cd/v${ver}/manifests/ha/install.yaml
-popd 
-
+ok(){
+    # https://github.com/argoproj/argo-cd/releases
+    # https://argo-cd.readthedocs.io/en/stable/getting_started/?_gl=1*1mxdlxv*_ga*MTQwODE5OTE5Ni4xNzEwMTYwNjYz*_ga_5Z1VTPDL73*MTcxMDE2MDY2My4xLjAuMTcxMDE2MDY2Ny4wLjAuMA..
+    ver='2.10.2'
+    dir="argocd-$ver"
+    [[ -f $dir/argocd.yaml && $(./$dir/argocd-linux-amd64 version --client |grep $ver) ]] && return 0
+    mkdir -p $dir
+    pushd $dir
+    ## Argo CLI
+    base_url=https://github.com/argoproj/argo-cd/releases/download/v${ver}
+    wget -nv $base_url/argocd-linux-amd64
+    ## Argo manifest
+    #kubectl create namespace argocd
+    #kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v${ver}/manifests/install.yaml
+    base_url=https://raw.githubusercontent.com/argoproj/argo-cd/v${ver}/manifests
+    wget -nv -O argocd.yaml $base_url/install.yaml
+    # Argo HA manifest
+    #kubectl create namespace argocd
+    #kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v${ver}/manifests/ha/install.yaml
+    wget -nv -O argocd-ha.yaml $base_url/ha/install.yaml
+    popd 
+}
+ok
 
 # @ Istio : Image dependencies are effectively hidden, eg, "istio/proxyv2" is a bogus image
-# https://istio.io/latest/docs/setup/getting-started/
-# https://github.com/istio/istio/releases/
-ver='1.20.3' # App / Chart (same)
-dir="istio-$ver"
-mkdir -p $dir
-push $dir 
-## istioctl method
-mkdir -p istioctl-method
-pushd istioctl-method
-tarball="${dir}-linux-${ARCH}.tar.gz"
-wget -nv https://github.com/istio/istio/releases/download/$ver/$tarball
-tar xaf $tarball
-popd 
-## Helm method 
-# https://artifacthub.io/packages/helm/istio-official/istiod
-mkdir -p helm-method
-pushd helm-method
-repo='istio-official'
-chart='istiod' 
-helm pull --version $ver $repo/$chart    
-helm pull --version $ver $repo/$chart && {
+ok(){
+    # https://istio.io/latest/docs/setup/getting-started/
+    # https://github.com/istio/istio/releases/
+    #ver='1.20.3' # App / Chart (same)
+    ver='1.21.0' # App / Chart (same)
+    dir="istio-$ver"
+    mkdir -p $dir
+    push $dir 
+    ## istioctl method
+    mkdir -p istioctl-method
+    pushd istioctl-method
+    tarball="${dir}-linux-${ARCH}.tar.gz"
+    [[ -f $tarball ]] || { 
+        wget -nv https://github.com/istio/istio/releases/download/$ver/$tarball
+        #tar xaf $tarball
+    }
+    popd 
+    ## Helm method 
+    # https://artifacthub.io/packages/helm/istio-official/istiod
+    repo='istio-official'
+    chart='istiod' 
+    dir='helm-method'
+    [[ -f $dir/${chart}-$ver.tgz ]] && return 0
+    mkdir -p $dir
+    pushd $dir 
+    helm repo add istio-official https://istio-release.storage.googleapis.com/charts
+    helm pull $repo/$chart --version $ver && {
         [[ $(type -t hdi) ]] && {
             tar -xaf ${chart}-$ver.tgz && hdi $chart && cp -p $chart/values.yaml . && rm -rf $chart
         } 
     }
-popd
-popd 
-
+    popd
+    popd 
+}
+ok
 
 # @ Vault https://hub.docker.com/r/hashicorp/vault
-## vault-secrets-operator : https://github.com/hashicorp/vault-secrets-operator
-#docker pull hashicorp/vault:1.15.6
-# https://artifacthub.io/packages/helm/hashicorp/vault
-# 1.15.2 @ 0.27.0
-ver='1.15.2'
-mkdir -p vault-$ver
-pushd vault-$ver
-helm repo add hashicorp https://helm.releases.hashicorp.com
-helm pull hashicorp/vault --version 0.27.0
-popd 
+ok(){
+    ## vault-secrets-operator : https://github.com/hashicorp/vault-secrets-operator
+    #docker pull hashicorp/vault:1.15.6
+    # https://artifacthub.io/packages/helm/hashicorp/vault
+    repo=hashicorp
+    chart=vault
+    ver='1.15.2' # App
+    dir="${chart}-$ver"
+    ver='0.27.0' # Chart
+    [[ -f $dir/${chart}-$ver.tgz ]] && return 0
+    mkdir -p $dir
+    pushd $dir
+    helm repo add hashicorp https://helm.releases.hashicorp.com
+    helm pull $repo/$chart --version $ver && {
+        [[ $(type -t hdi) ]] && {
+            tar -xaf ${chart}-$ver.tgz && hdi $chart && cp -p $chart/values.yaml . && rm -rf $chart
+        } 
+    }
+    popd 
+}
+ok 
 
 # @ Metrics Server 
-# https://artifacthub.io/packages/helm/metrics-server/metrics-server
-ver='0.7.0' # App version 
-mkdir -p metrics-server-$ver
-pushd metrics-server-$ver
-ver='3.12.0' # Chart version 
-helm pull metrics-server/metrics-server --version $ver 
-#tar -xaf metrics-server-$ver.tgz
-#find metrics-server -type f -iname '*.yaml' -exec cat {} \; |grep -A1 repository
-popd 
+ok(){
+    # https://artifacthub.io/packages/helm/metrics-server/metrics-server
+    repo='metrics-server'
+    chart='metrics-server'
+    ver='0.7.0' # App
+    dir="${chart}-$ver"
+    [[ -f $dir/${chart}-$ver.tgz ]] && return 0
+    ver='3.12.0' # Chart
+    mkdir -p $dir
+    pushd $dir
+    helm pull $repo/$chart --version $ver && {
+        [[ $(type -t hdi) ]] && {
+            tar -xaf ${chart}-$ver.tgz && hdi $chart && cp -p $chart/values.yaml . && rm -rf $chart
+        } 
+    }
+    #tar -xaf metrics-server-$ver.tgz
+    #find metrics-server -type f -iname '*.yaml' -exec cat {} \; |grep -A1 repository
+    popd 
+}
+ok 
 
 # @ fluent-operator : Fluentd + Fluent Bit
-# https://github.com/fluent/fluent-operator
-# https://artifacthub.io/packages/helm/fluent/fluent-operator
-ver='2.7.0'
-repo='fluent'
-chart='fluent-operator'
-mkdir $chart-$ver 
-pushd $chart-$ver 
-helm repo add $repo https://fluent.github.io/helm-charts
-helm pull --version=$ver $repo/$chart
-wget -nv https://github.com/fluent/fluent-operator/archive/refs/heads/master.zip
-popd 
-
-# StorageClass
+ok(){
+    # https://github.com/fluent/fluent-operator
+    # https://artifacthub.io/packages/helm/fluent/fluent-operator
+    ver='2.7.0'
+    repo='fluent'
+    chart='fluent-operator'
+    dir="${chart}-$ver"
+    [[ -f $dir/${chart}-$ver.tgz ]] && return 0
+    mkdir -p $dir
+    pushd $dir
+    helm repo add $repo https://fluent.github.io/helm-charts
+    helm pull $repo/$chart --version $ver && {
+        [[ $(type -t hdi) ]] && {
+            tar -xaf ${chart}-$ver.tgz && hdi $chart && cp -p $chart/values.yaml . && rm -rf $chart
+        } 
+    }
+    wget -nv https://github.com/fluent/fluent-operator/archive/refs/heads/master.zip
+    popd 
+}
+ok
 
 # @ nfs-client : nfs-subdir-external-provisioner
-# https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner/releases
-# https://artifacthub.io/packages/helm/nfs-subdir-external-provisioner/nfs-subdir-external-provisioner
-ver='4.0.18' # Chart : image tag: 4.0.2
-repo='nfs-subdir-external-provisioner'
-chart='nfs-subdir-external-provisioner'
-mkdir -p nfs-client-$ver 
-pushd nfs-client-$ver 
-#release='nfs-client'
-helm pull --version $ver $repo/$chart
-popd 
+ok(){
+    # https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner/releases
+    # https://artifacthub.io/packages/helm/nfs-subdir-external-provisioner/nfs-subdir-external-provisioner
+    repo='nfs-subdir-external-provisioner'
+    chart=$repo
+    ver='4.0.18' # image tag is: 4.0.2
+    dir=nfs-client
+    [[ -f $dir/${chart}-$ver.tgz ]] && return 0
+    mkdir -p $dir
+    pushd $dir
+    helm pull $repo/$chart --version $ver && {
+        [[ $(type -t hdi) ]] && {
+            tar -xaf ${chart}-$ver.tgz && hdi $chart && cp -p $chart/values.yaml . && rm -rf $chart
+        } 
+    }
+    popd 
+}
+ok
 
 # @ longhorn : local-storage : rancher/local-path-provisioner
-# https://github.com/rancher/local-path-provisioner
-# https://artifacthub.io/packages/helm/longhorn/longhorn
-repo='longhorn'
-chart='longhorn'
-mkdir -p $repo
-pushd $repo 
-ver='1.6.0' # App + Chart
-mkdir -p helm-method-$ver
-push helm-method-$ver
-## Helm method
-#release='nfs-client'
-helm repo add longhorn https://charts.longhorn.io
-helm pull --version $ver $repo/$chart 
-# INSTALL TO NAMESPACE : --namespace longhorn-system
-popd 
-## kubectl method
-ver='1.5.3'
-mkdir -p kubectl-method-$ver
-pushd kubectl-method-$ver
-# https://longhorn.io/docs/1.5.3/deploy/install/install-with-kubectl/
-yaml=longhorn.yaml
-url=https://raw.githubusercontent.com/longhorn/longhorn/v1.5.3/deploy/$yaml
-wget -nv $url
-popd 
-
+ok(){
+    # https://github.com/rancher/local-path-provisioner
+    # https://artifacthub.io/packages/helm/longhorn/longhorn
+    repo='longhorn'
+    chart='longhorn'
+    mkdir -p $repo
+    pushd $repo 
+    ver='1.6.0' # App + Chart
+    mkdir -p helm-method-$ver
+    push helm-method-$ver
+    ## Helm method : Install to NAMESPACE : longhorn-system
+    [[ -f ${chart}-$ver.tgz ]] || {
+        helm repo add $repo  https://charts.longhorn.io
+        helm pull $repo/$chart --version $ver && {
+            [[ $(type -t hdi) ]] && {
+                tar -xaf ${chart}-$ver.tgz && hdi $chart && cp -p $chart/values.yaml . && rm -rf $chart
+            } 
+        }
+    }
+    popd 
+    ## kubectl method
+    ver='1.5.3'
+    mkdir -p kubectl-method-$ver
+    pushd kubectl-method-$ver
+    # https://longhorn.io/docs/1.5.3/deploy/install/install-with-kubectl/
+    yaml=longhorn.yaml
+    url=https://raw.githubusercontent.com/longhorn/longhorn/v1.5.3/deploy/$yaml
+    [[ -f $yaml ]] || wget -nv $url
+    popd 
+    popd
+}
+ok
 
 exit 0
 ######

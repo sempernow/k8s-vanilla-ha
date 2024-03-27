@@ -14,10 +14,25 @@ sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
 sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
 rm cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
 
-# Use CLI to install cilium into cluster
-cilium install --version=1.14.1 \
-    --helm-set ipam.operator.clusterPoolIPv4PodCIDRList=["10.42.0.0/16"]  \
-    --helm-set image.tag=1.14.1
+## Use CLI to install cilium into cluster
+# cilium install --version=1.14.1 \
+#     --helm-set ipam.operator.clusterPoolIPv4PodCIDRList=["10.42.0.0/16"]  \
+#     --helm-set image.tag=1.14.1
+
+folder()
+{
+    [[ $1 ]] && {
+        echo "$(find . -maxdepth 1 -type d -iname "${1}*" -printf "$(pwd)/%P\n" |tail -n1)"
+    }
+}
+
+echo "=== @ cilium/cilium : install by Helm"
+folder=$(folder cilium)
+tarball="$(find $folder -type f -iname '*.tgz')"
+[[ -d $folder/cilium ]] && tar -xaf $tarball -C $folder 
+helm upgrade cilium $folder/cilium/ --install --namespace kube-system
+cilium status
+
 
 
 # Requirements : Kernel compile-time options

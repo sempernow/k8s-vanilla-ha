@@ -1,55 +1,25 @@
-# ['N52626/k8s-air-gap-install'](https://github.northgrum.com/N52626/k8s-air-gap-install "github.northgrum.com")
+# rhel8-air-gap
 
 >This project automates an air-gap install of vanilla K8s + external HA LB 
 >onto three VMs of RHEL 8.9 that have no access to EPEL repo and perhaps dated base repos.
 
-# Doings 
+## Use:
 
-Scripted : See `Makefile` recipes
-
-# Plans ...
-
-## Phases and Order
-
-### Prep
-
-- Install Ansible on admin node (not a cluster node)
-- Prepare all target machines by running this script on each one. 
-  It requires `root` privileges.
-    - [`create_provisioner_target_node.sh`](scripts/create_provisioner_target_node.sh)
+```bash
+make
+```
+- See [`Makefile`](Makefile) recipes
 
 
-### Provision
+## Reference
 
-- Push all assets to each machine
-- Install binaries
-- Install RPMs
-
-### Configure Hosts
-
-- Kernel
-- FS
-- Network 
-- Firewall
-
-### Configure External Load Balancer
-
-- HALB @ control node(s)
-
-### Build Cluster 
-
-- Initialize
-- Configure
-- Join
-
-
-## Prep all target machines
+### Prep target machines
 
 @ target machines
 
 ```bash
 # Create the provisioner user
-u=ansible
+u='gitops'
 sudo adduser $u
 sudo passwd $u
 sudo groupadd $u
@@ -62,11 +32,11 @@ echo "$u ALL=(ALL) NOPASSWD: ALL" |sudo tee /etc/sudoers.d/$u
 @ admin machine
 
 ```bash
-host=10.160.113.243
+host='10.160.113.243'
 hostfprs $host # Scan and list host fingerprint(s) (FPRs)
 # Validate host by matching host-claimed FPR against those scanned,
 # and push key if match.
-ssh-copy-id ~/.ssh/config/vm_common $u1@$host
+ssh-copy-id ~/.ssh/config/vm_common $u@$host
 # Add entry for $u@$host
 vim ~/.ssh/config
 # Test 
@@ -79,37 +49,15 @@ ssh $u@$host sudo ls -hl /etc/sudoers.d/
 To prepare for air-gap provisioning of VMs.
 
 ```bash
-# Update else stale version of repo is downloaded
-sudo dnf -y update # Important !!!
-
-# All packages of this list are provided by either BaseOS or AppStream repos
-list='make gcc mkisofs iproute-tc bash-completion bind-utils tar nc socat lsof wget curl git httpd httpd-tools jq vim tree'
+mkdir rpms && pushd rpms
+sudo dnf -y update
+sudo dnf -y makecache 
+opts='--archlist x86_64,noarch --alldeps --resolve'
 try='--nobest --allowerasing'
-rpms=rpms # Folder containing the downloaded RPM(s)
-mkdir -p $rpms;cd $rpms
+#log="_dnf.download.opts.all.$(date '+%Y-%m-%dT%H.%M.%Z').log"
+sudo dnf -y download $opts $list || sudo dnf -y download $opts $try $list 
 
-# Optionally log pkg names/repos list
-pkg_info=dnf.provides.list.log
-sudo dnf provides $list |tee $pkg_info
-cat $pkg_info |grep Repo |sort -u 
-
-# Download all rpms listed and their recursive dependencies (135MB of 253 rpm files)
-printf "%s\n" $list |xargs -IX /bin/bash -c '
-        echo "=== @ $1"
-        sudo dnf -y download --alldeps --resolve $1 \
-            || sudo dnf -y download $0 --alldeps --resolve $1
-    ' "$try" X |& tee rpms.download.log
-
-# Simpler and has same effect, but probably lots of redundant-download attempts
-sudo dnf -y download --alldeps --resolve $list || sudo dnf -y download $try --alldeps --resolve $list
-
-# Sans dependencies
-printf "%s\n" $list |xargs -IX /bin/bash -c '
-        echo "=== @ $1"
-        sudo dnf -y download $1 \
-            || sudo dnf -y download $0 $1
-    ' "$try" X |& tee rpms.download.log
-
+popd
 ```
 - Most dependencies are redundant, 
   often installed by prior installs,
@@ -145,108 +93,23 @@ sudo dnf -y install $pkg
 dnf repolist
 ```
 
-## Make ISO of repo | [`make_repo_iso.sh`](make_repo_iso.sh)
+## Docker-Kubernetes Shim : `cri-dockerd`
 
-Repo ISOs are used by hypervisors along with an OS golden image, 
-especially in restricted-network environments.
+### USE
 
-### UPDATE: use "`dnf reposync ...`" method
+At each node:
 
-```bash
-# Update else stale version of repo is downloaded
-sudo dnf -y update # Important !!!
+Open `/var/lib/kubelet/kubeadm-flags.env` on each affected node.  
+Modify the `--container-runtime-endpoint` flag to `unix:///var/run/cri-dockerd.sock`.  
+Modify the `--container-runtime` flag to `remote` (unavailable in Kubernetes v1.27 and later).
 
-mkdir -p repos;pushd repos
 
-# Install tools
-sudo dnf -y install dnf-plugins-core createrepo_c genisoimage
+@ `/var/lib/kubelet/kubeadm-flags.env`
 
-# FYI: Public EPEL repoid is "epel" and is ~ 17GB. This one is ~ 47GB
-id='EDN_EPEL9_EPEL9' 
-
-# Download repo and meta
-sudo dnf reposync --gpgcheck --repoid=$id --download-path=$(pwd) --downloadcomps --downloadonly --download-metadata
-
-# Create repo
-sudo createrepo_c $id
-
-# Make ISO
-genisoimage -o $id.iso -R -J -joliet-long $id
+```text
+--container-runtime-endpoint=unix:///var/run/cri-dockerd.sock
+--container-runtime=remote # NOT @ v1.27+
 ```
-
-REF 
-
-```bash
-dnf config-manager --dump # See all settings
-# If install fails due to (false) GPG key problems, ... 
-sudo dnf -y install --nogpgcheck $pkg 
-
-# Test for installed package (when not of a binary name)
-rpm -q --quiet $pkg || echo "$pkg is NOT installed" 
-## or
-[[ $(dnf list --installed $pkg 2>&1 |grep $pkg) ]] \
-    || echo "$pkg is NOT installed" 
-```
-
-### Mount ISO
-
-```bash
-id='EDN_EPEL9_EPEL9'
-mnt=/mnt/$id
-sudo mkdir -p $mnt
-sudo mount -t iso9660 $id.iso $mnt
-
-```
-
-### Verify ISO content
-
-```bash
-$ ll $mnt
-total 164K
-drwxr-xr-x.  2 user1 group1 4.0K 2024-01-30 15:40 repodata
-drwxr-xr-x. 29 user1 group1 4.0K 2024-01-30 15:40 Packages
--rwxr-xr-x.  1 user1 group1 127K 2024-01-30 15:40 comps.xml
-```
-
-### Prior
-
-This direct reposync method is more aligned with yum; pre dnf.
-
-```bash
-# Create a repo (including its metadata)
-dir='repos';mkdir -p $dir;cd $dir
-reposync --gpgcheck --repoid=$id --download-path=$(pwd) --downloadcomps --downloadonly --download-metadata
-# Create repo metadata
-#createrepo . 
-#... Metadata (./repodata) already created by reposync 
-```
-
-```bash
-dir=$id # Created by reposync (above)
-mkisofs -o $dir.iso -J -joliet-long -R -v $dir
-```
-
-### Mount ISO
-
-```bash
-mnt='/mnt/epel'
-sudo mkdir -p $mnt
-sudo mount -t iso9660 $dir.iso $mnt
-
-```
-
-### Verify ISO content
-
-```bash
-$ ll $mnt
-total 164K
-drwxr-xr-x.  2 user1 group1 4.0K 2024-01-30 15:40 repodata
-drwxr-xr-x. 29 user1 group1 4.0K 2024-01-30 15:40 Packages
--rwxr-xr-x.  1 user1 group1  29K 2024-01-30 15:40 metalink.xml
--rwxr-xr-x.  1 user1 group1 127K 2024-01-30 15:40 comps.xml
-```
-- File `metalink.xml` does not exist if using the `dnf` method.
-
 
 ## CNCF Distribution Registry 
 
@@ -570,3 +433,106 @@ helm install my-jaeger jaegertracing/jaeger
 
 - Argo CD : https://github.com/argoproj-labs
 
+
+
+## Make ISO of repo | [`make_repo_iso.sh`](make_repo_iso.sh)
+
+Repo ISOs are used by hypervisors along with an OS golden image, 
+especially in restricted-network environments.
+
+### UPDATE: use "`dnf reposync ...`" method
+
+```bash
+# Update else stale version of repo is downloaded
+sudo dnf -y update # Important !!!
+
+mkdir -p repos;pushd repos
+
+# Install tools
+sudo dnf -y install dnf-plugins-core createrepo_c genisoimage
+
+# FYI: Public EPEL repoid is "epel" and is ~ 17GB. This one is ~ 47GB
+id='EDN_EPEL9_EPEL9' 
+
+# Download repo and meta
+sudo dnf reposync --gpgcheck --repoid=$id --download-path=$(pwd) --downloadcomps --downloadonly --download-metadata
+
+# Create repo
+sudo createrepo_c $id
+
+# Make ISO
+genisoimage -o $id.iso -R -J -joliet-long $id
+```
+
+REF 
+
+```bash
+dnf config-manager --dump # See all settings
+# If install fails due to (false) GPG key problems, ... 
+sudo dnf -y install --nogpgcheck $pkg 
+
+# Test for installed package (when not of a binary name)
+rpm -q --quiet $pkg || echo "$pkg is NOT installed" 
+## or
+[[ $(dnf list --installed $pkg 2>&1 |grep $pkg) ]] \
+    || echo "$pkg is NOT installed" 
+```
+
+### Mount ISO
+
+```bash
+id='EDN_EPEL9_EPEL9'
+mnt=/mnt/$id
+sudo mkdir -p $mnt
+sudo mount -t iso9660 $id.iso $mnt
+
+```
+
+### Verify ISO content
+
+```bash
+$ ll $mnt
+total 164K
+drwxr-xr-x.  2 user1 group1 4.0K 2024-01-30 15:40 repodata
+drwxr-xr-x. 29 user1 group1 4.0K 2024-01-30 15:40 Packages
+-rwxr-xr-x.  1 user1 group1 127K 2024-01-30 15:40 comps.xml
+```
+
+### Prior
+
+This direct reposync method is more aligned with yum; pre dnf.
+
+```bash
+# Create a repo (including its metadata)
+dir='repos';mkdir -p $dir;cd $dir
+reposync --gpgcheck --repoid=$id --download-path=$(pwd) --downloadcomps --downloadonly --download-metadata
+# Create repo metadata
+#createrepo . 
+#... Metadata (./repodata) already created by reposync 
+```
+
+```bash
+dir=$id # Created by reposync (above)
+mkisofs -o $dir.iso -J -joliet-long -R -v $dir
+```
+
+### Mount ISO
+
+```bash
+mnt='/mnt/epel'
+sudo mkdir -p $mnt
+sudo mount -t iso9660 $dir.iso $mnt
+
+```
+
+### Verify ISO content
+
+```bash
+$ ll $mnt
+total 164K
+drwxr-xr-x.  2 user1 group1 4.0K 2024-01-30 15:40 repodata
+drwxr-xr-x. 29 user1 group1 4.0K 2024-01-30 15:40 Packages
+-rwxr-xr-x.  1 user1 group1  29K 2024-01-30 15:40 metalink.xml
+-rwxr-xr-x.  1 user1 group1 127K 2024-01-30 15:40 comps.xml
+```
+- File `metalink.xml` does not exist if using the `dnf` method.

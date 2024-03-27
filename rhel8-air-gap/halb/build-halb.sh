@@ -64,19 +64,19 @@ rm $target
 
 target="keepalived-$HALB_FQDN_1.conf"
 sed -i "/  $lb_1_ipv4/d" $target
-sed -i "s/UNICAST_SRC_IP/$lb_1_ipv4/" $target
+sed -i "s/THIS_IP/$lb_1_ipv4/" $target
 
 target="keepalived-$HALB_FQDN_2.conf"
 sed -i "s/state MASTER/state BACKUP/" $target
 sed -i "s/priority 255/priority 254/" $target
 sed -i "/  $lb_2_ipv4/d" $target
-sed -i "s/UNICAST_SRC_IP/$lb_2_ipv4/" $target
+sed -i "s/THIS_IP/$lb_2_ipv4/" $target
 
 target="keepalived-$HALB_FQDN_3.conf"
 sed -i "s/state MASTER/state BACKUP/" $target
 sed -i "s/priority 255/priority 253/" $target
 sed -i "/  $lb_3_ipv4/d" $target
-sed -i "s/UNICAST_SRC_IP/$lb_3_ipv4/" $target
+sed -i "s/THIS_IP/$lb_3_ipv4/" $target
 
 # @ haproxy
 
@@ -100,32 +100,32 @@ $lb_3_ipv4 $HALB_FQDN_3
 EOH
 cat $target
 
-# @ /etc/environment : If has no_proxy param, 
-    # then reset if not already include HALB addresses
-    # CIDR to IP Range : https://www.ipaddressguide.com/cidr | https://cidr.xyz/
-        # E.g., 
-        # CIDR:        10.160.113.234/27
-        # First IP:    10.160.113.224
-        # Last IP:     10.160.113.255
-[[ $(cat /etc/environment |grep -i no_proxy) ]] && {
-    target='etc.environment'
-    no_proxy="$(cat /etc/environment |grep -i no_proxy |cut -d'=' -f2)"
-    [[ "${no_proxy/$HALB_FQDN_1/}" == "$no_proxy" ]] && {
-        halb_addr_list="
-            $HALB_CIDR
-            $K8S_SERVICE_CIDR
-            $K8S_POD_CIDR
-            .$HALB_FQDN_1 
-            .$HALB_FQDN_2 
-            .$HALB_FQDN_3
-        "
-        # Append HALB addresses to those already in no_proxy
-        for addr in $halb_addr_list; do no_proxy=$no_proxy,$addr;done
-    }
-    # Clone source to target, replacing "no_proxy=..." line of source
-    sed  "/no_proxy/d" /etc/environment >$target
-    echo "no_proxy=$no_proxy" |tee -a $target
+# @ /etc/environment : Reset no_proxy param if not already include HALB addresses
+
+## CIDR to IP Range : https://www.ipaddressguide.com/cidr | https://cidr.xyz/
+##
+## CIDR:        10.160.113.234/27
+## First IP:    10.160.113.224
+## Last IP:     10.160.113.255
+
+target='etc.environment'
+no_proxy="$(cat /etc/environment |grep -i no_proxy |cut -d'=' -f2)"
+[[ "${no_proxy/$HALB_FQDN_1/}" == "$no_proxy" ]] && {
+    halb_addr_list="
+        $HALB_CIDR
+        $K8S_SERVICE_CIDR
+        $K8S_POD_CIDR
+        .$HALB_FQDN_1 
+        .$HALB_FQDN_2 
+        .$HALB_FQDN_3
+    "
+    # Append HALB addresses to those already in no_proxy
+    for addr in $halb_addr_list; do no_proxy=$no_proxy,$addr;done
 }
+# Capture source file, deleting its "no_proxy=..." line
+sed  "/no_proxy/d" /etc/environment >$target
+# Append the new no_proxy line
+echo "no_proxy=$no_proxy" |tee -a $target
 
 popd
 

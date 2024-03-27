@@ -8,6 +8,8 @@ images(){
 }
 export -f images 
 
+[[ -d $1 ]] && pushd $1 
+
 # find . -type f -iname '*.tgz' -exec /bin/bash -c '
 #     images="$(helm template $1 |yq .spec.template.spec.containers[].image |sort -u)"
 #     [[ "$images" ]] && printf "=== Images @ %s :\n%s\n\n"  $1 "$images"
@@ -29,6 +31,7 @@ find . -type f -iname '*.tgz' -exec /bin/bash -c '
 # images="$(helm template $1 |yq .spec.template.spec.containers[].image |sort -u)"
 # [[ "$images" ]] && printf "=== Images @ %s :\n%s\n\n"  $1 "$images"
 
+popd 
 exit 0 
 ######
 

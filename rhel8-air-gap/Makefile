@@ -1,6 +1,6 @@
 ##############################################################################
 ## Makefile.settings : Environment Variables for Makefile(s)
-#include Makefile.settings
+include Makefile.settings
 
 ##############################################################################
 ## Environment variable rules:
@@ -30,12 +30,13 @@ export LOG_PREFIX := make.$(shell date '+%Y-%m-%dT%H.%M.%Z')
 ##############################################################################
 ## Registry
 
-export CNCF_REGISTRY_IMAGE  ?= registry:2.8.3
-#export CNCF_REGISTRY_HOST   ?= localhost
-export CNCF_REGISTRY_HOST   ?= ONXWQBLCS121.entds.ngisn.com
-export CNCF_REGISTRY_PORT   ?= 5000
+export CNCF_REGISTRY_IMAGE  	?= registry:2.8.3
+#export CNCF_REGISTRY_HOST   	 ?= localhost
+export CNCF_REGISTRY_HOST   	?= ONXWQBLCS121.entds.ngisn.com
+export CNCF_REGISTRY_PORT   	?= 5000
+export CNCF_REGISTRY_ENDPOINT 	?= ${CNCF_REGISTRY_HOST}:${CNCF_REGISTRY_PORT}
 #export CNCF_REGISTRY_STORE  ?= /home/entds.ngisn.com/4n52626/mnt/registry
-export CNCF_REGISTRY_STORE  ?= /tmp/registry
+export CNCF_REGISTRY_STORE  	?= /tmp/registry
 
 
 ##############################################################################
@@ -80,7 +81,7 @@ export K8S_VERSION            ?= 1.29.2
 export K8S_PROVISIONER        ?= ${GITOPS_USER}
 export K8S_PROVISIONER_KEY    ?= ~/.ssh/vm_common
 #export K8S_REGISTRY           ?= registry.k8s.io
-export K8S_REGISTRY           ?= ${CNCF_REGISTRY_HOST}:${CNCF_REGISTRY_PORT}
+export K8S_REGISTRY           ?= ${CNCF_REGISTRY_ENDPOINT}
 export K8S_VERBOSITY          ?= 5
 export K8S_INIT_NODE_SSH      ?= $(shell echo ${GITOPS_NODES_MASTER} |cut -d' ' -f1)
 export K8S_INIT_NODE          ?= ${HALB_FQDN_1}
@@ -121,6 +122,7 @@ menu :
 	@echo "dl-bins      : Download to admin machine all non-RPM assets (except container images)"
 	@echo "push         : Push this project, ${PWD}, to targets @ /tmp/"
 	@echo "prep         : Pre-install tasks"
+	@echo "firewalls    : firewalld mods"
 	@echo "rpms         : Install all RPM packages"
 	@echo "bins         : Install binaries"
 	@echo "post         : Configure host, services, and user (${GITOPS_USER})"
@@ -130,10 +132,11 @@ menu :
 	@echo "lbconf       : Configure HA LB on all control nodes"
 	@echo "lbverify     : Verify HA-LB dynamics"
 	@echo "============== "
+	@echo "imghelm      : Build list of all helm-chart images"
 	@echo "imgload      : Load container images into Docker cache"
-	@echo "imgreg       : docker run ... a CNCF-distribution registry (${CNCF_REGISTRY_HOST}) on this machine (local)"
-	@echo "imgpush      : Tag and push container images to local registry (${CNCF_REGISTRY_HOST})"
-	@echo "imgcat       : GET /v2/_catalog of local registry (${CNCF_REGISTRY_HOST})"
+	@echo "imgreg       : docker run ... a CNCF-distribution registry (${CNCF_REGISTRY_ENDPOINT}) on this machine (local)"
+	@echo "imgpush      : Tag and push container images to local registry (${CNCF_REGISTRY_ENDPOINT})"
+	@echo "imgcat       : GET /v2/_catalog of local registry (${CNCF_REGISTRY_ENDPOINT})"
 	@echo "============== "
 	@echo "conf-prep    : Generate cluster PKI (if not exist) at K8S_INIT_NODE; update Makefile.settings"
 	@echo "conf-gen     : Generate ${K8S_KUBEADM_CONFIG} from .tpl"
@@ -148,6 +151,8 @@ menu :
 	@echo "join-worker  : kubeadm join ..."
 	@echo "conf-kubectl : Make ~/.kube/config"
 	@echo "nodes        : kubectl get nodes"
+	@echo "kw           : kubectl get pods -o wide (current namespace; see kn)"
+	@echo "cilium       : cilium status"
 
 
 env : 
@@ -224,15 +229,28 @@ push :
 	ansibash -c 'sudo ls -hlrt ${GITOPS_DST_DIR}/scripts' \
 		|& tee ${GITOPS_SRC_DIR}/logs/${LOG_PREFIX}.push.ls.log
 
-prep : 
+prep : firewalls 
 	ansibash -s ${GITOPS_SRC_DIR}/scripts/hello.sh
 	ansibash -s ${GITOPS_SRC_DIR}/scripts/prep-env.sh 
-	ansibash -s ${GITOPS_SRC_DIR}/scripts/firewalld-k8s.sh
-	ansibash -s ${GITOPS_SRC_DIR}/scripts/firewalld-istio.sh
-	ansibash -s ${GITOPS_SRC_DIR}/scripts/firewalld-calico.sh 
-	ansibash sudo firewall-cmd --reload 
 	ansibash sudo dnf -y update 
 	ansibash sudo dnf -y makecache
+
+# vip="${HALB_VIP:-192.168.0.100}"
+# vip6="${HALB_VIP6:-::ffff:c0a8:64}"
+# vport="${HALB_PORT:-8443}"
+# device="${HALB_DEVICE:-eth0}" # Network interface common to all LB nodes
+# vip="${1}"
+# vip6="${2}"
+# vport="${3}"
+# device="${4}" # Network interface common to all LB nodes
+
+firewalls : 
+	ansibash -s ${GITOPS_SRC_DIR}/halb/firewalld-halb.sh ${HALB_VIP} ${HALB_VIP6} ${HALB_PORT} ${HALB_DEVICE} \
+		&& ansibash -s ${GITOPS_SRC_DIR}/scripts/firewalld-k8s.sh \
+		&& ansibash -s ${GITOPS_SRC_DIR}/scripts/firewalld-istio.sh \
+		&& ansibash -s ${GITOPS_SRC_DIR}/scripts/firewalld-cilium.sh \
+		&& ansibash sudo firewall-cmd --reload \
+		|& tee ${GITOPS_SRC_DIR}/logs/${LOG_PREFIX}.firewalls.log
 
 .PHONY: rpms etcd
 
@@ -305,6 +323,10 @@ lblook :
 lbfix :	
 	ssh gitops@vm124 /bin/bash -s <${GITOPS_SRC_DIR}/halb/firewalld-halb.sh ${HALB_VIP} ${HALB_VIP6} ${HALB_PORT} ${HALB_DEVICE}
 
+imghelm :
+	${GITOPS_SRC_DIR}/scripts/oci-images-in-charts.sh \
+		|& tee ${GITOPS_SRC_DIR}/logs/${LOG_PREFIX}.imghelm.log
+	
 # Load images locally (admin node)
 imgload : 
 	${GITOPS_SRC_DIR}/scripts/oci-images-load.sh \
@@ -319,11 +341,11 @@ imgreg :
 			${CNCF_REGISTRY_IMAGE}
 
 imgpush :
-	${GITOPS_SRC_DIR}/scripts/oci-images-push-local.sh ${CNCF_REGISTRY_HOST}:${CNCF_REGISTRY_PORT} \
+	${GITOPS_SRC_DIR}/scripts/oci-images-push-local.sh ${CNCF_REGISTRY_ENDPOINT} \
 		|& tee ${GITOPS_SRC_DIR}/logs/${LOG_PREFIX}.imgpush.log
 
 imgcat :
-	curl -s --noproxy '*' http://${CNCF_REGISTRY_HOST}:${CNCF_REGISTRY_PORT}/v2/_catalog |jq . 
+	curl -s --noproxy '*' http://${CNCF_REGISTRY_ENDPOINT}/v2/_catalog |jq . 
 
 ## Generate cluster PKI (if not exist) and declare kubeadm-relevant params at Makefile.settings 
 conf-prep :
@@ -430,4 +452,8 @@ node nodes get-nodes :
 kw :
 	ssh ${GITOPS_USER}@${K8S_INIT_NODE_SSH} kw \
 		|& tee ${GITOPS_SRC_DIR}/logs/${LOG_PREFIX}.kw.log
+
+cilium :
+	ssh ${GITOPS_USER}@${K8S_INIT_NODE_SSH} cilium status \
+		|& tee ${GITOPS_SRC_DIR}/logs/${LOG_PREFIX}.cilium.status.log
 

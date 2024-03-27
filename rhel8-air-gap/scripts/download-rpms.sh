@@ -24,13 +24,16 @@ log="_dnf.download.opts.all.$(date '+%Y-%m-%dT%H.%M.%Z').log"
 sudo dnf -y $try update  |& tee $log  
 sudo dnf -y makecache  |& tee -a $log  
 
-## Utilities
-# If use "--arch x86_64" flag, then "No packages available"
-all='yum-utils dnf-plugins-core gcc make createrepo createrepo_c mkisofs ansible ansible-core iproute-tc bash-completion bind-utils tar nc socat rsync lsof wget curl tcpdump traceroute nmap arp-scan git httpd httpd-tools jq vim tree'
-# mkisofs is xorriso : The above also installs reposync
-#sudo dnf -y download --nobest --allowerasing --alldeps --resolve $all # 198 packages
-sudo dnf -y download $opts $all |& tee -a $log  
-#... ~ 198 packages
+utils(){
+    ## Utilities
+    # If use "--arch x86_64" flag, then "No packages available"
+    all='yum-utils dnf-plugins-core gcc make createrepo createrepo_c mkisofs ansible ansible-core iproute-tc bash-completion bind-utils tar nc socat rsync lsof wget curl tcpdump traceroute nmap arp-scan git httpd httpd-tools jq vim tree'
+    # mkisofs is xorriso : The above also installs reposync
+    #sudo dnf -y download --nobest --allowerasing --alldeps --resolve $all # 198 packages
+    sudo dnf -y download $opts $all |& tee -a $log  
+    #... ~ 198 packages
+}
+utils 
 
 # Kuberenetes RPMs
 # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/#installing-kubeadm-kubelet-and-kubectl
